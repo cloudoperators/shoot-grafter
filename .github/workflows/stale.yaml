@@ -1,0 +1,11 @@
+name: Close inactive issues
+on:
+  schedule:
+    - cron: "36 1 * * *"
+
+jobs:
+  stale:
+    permissions:
+      issues: write
+      pull-requests: write
+    uses: cloudoperators/common/.github/workflows/shared-stale.yaml@main
