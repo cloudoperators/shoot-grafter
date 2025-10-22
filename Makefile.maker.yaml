@@ -21,6 +21,8 @@ controllerGen:
 githubWorkflow:
   ci:
     enabled: true
+    runOn: 
+      - "ubuntu-latest"
   global:
     defaultBranch: main
 

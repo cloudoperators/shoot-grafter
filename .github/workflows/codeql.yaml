@@ -24,7 +24,7 @@ permissions:
 jobs:
   analyze:
     name: CodeQL
-    runs-on: {group: organization/Default}
+    runs-on: ubuntu-latest
     env:
       NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
     steps:
