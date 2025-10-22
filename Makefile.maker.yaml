@@ -35,3 +35,7 @@ reuse:
       - '*/zz_generated.deepcopy.go'
       SPDX-FileCopyrightText: 2020 The Kubernetes Authors # this is the copyright line for kubebuilder which generates those files
       SPDX-License-Identifier: Apache-2.0
+    - paths:
+        - '.github/**'
+      SPDX-FileCopyrightText: 'SAP SE or an SAP affiliate company'
+      SPDX-License-Identifier: Apache-2.0
