@@ -1,0 +1,37 @@
+# Configuration file for <https://github.com/sapcc/go-makefile-maker>
+
+metadata:
+  url: github.com/cloudoperators/shoot-grafter
+
+binaries:
+  - name:        shoot-grafter
+    fromPackage: .
+    installTo:   bin/
+
+golang:
+  setGoModVersion: true
+
+golangciLint:
+  createConfig: true
+
+controllerGen:
+  enabled: true
+  rbacRoleName: manager-role
+
+githubWorkflow:
+  ci:
+    enabled: true
+  global:
+    defaultBranch: main
+
+renovate:
+  enabled: true
+  assignees:
+    - "@cloudoperators/greenhouse-backend"
+
+reuse:
+  annotations:
+    - paths:
+      - '*/zz_generated.deepcopy.go'
+      SPDX-FileCopyrightText: 2020 The Kubernetes Authors # this is the copyright line for kubebuilder which generates those files
+      SPDX-License-Identifier: Apache-2.0
