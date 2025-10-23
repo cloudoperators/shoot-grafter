@@ -13,6 +13,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
 	make build CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH}
 
+RUN ls -al /workspace/build/
+
 # Use distroless as minimal base image to package the shoot-grafter binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM --platform=${BUILDPLATFORM:-linux/amd64} gcr.io/distroless/static:nonroot
