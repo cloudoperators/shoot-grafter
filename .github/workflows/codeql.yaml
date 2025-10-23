@@ -1,11 +1,19 @@
-name: CodeQL
+name: "CodeQL"
+
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    types: [ opened, synchronize, reopened ]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'internal/**'
+      - 'e2e/**'
+      - 'cmd/**'
+      - 'Dockerfile*'
+      - 'go.mod'
+      - 'go.sum'
   schedule:
-    - cron: '20 08 * * 1'
+    - cron: "20 08 * * 1"
 
 jobs:
   codeql:
@@ -18,10 +26,7 @@ jobs:
       runs-on: "['ubuntu-latest']"
       language: "['go']"
       go-check: true
-      go-version: "['1.23']"
+      go-version: "['1.25']"
       node-check: false
-      # node-version : "['node']"
-      # fail-fast: false  
-      # timeout: 30
-      autobuild: true
-      # build_query: "make something"
+      autobuild: false
+      build_query: "make build"
