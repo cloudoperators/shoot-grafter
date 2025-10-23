@@ -28,6 +28,12 @@ githubWorkflow:
       - "ubuntu-latest"
   global:
     defaultBranch: main
+  pushContainerToGhcr:
+    enabled: true
+    platforms: "linux/amd64,linux/arm64"
+    tagStrategy:
+      - latest
+      - sha
 
 renovate:
   enabled: true
