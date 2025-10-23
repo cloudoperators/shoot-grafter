@@ -11,7 +11,7 @@ COPY . .
 # Build shoot-grafter operator and tooling.
 RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
-	make build CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH}
+	make build-all CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH}
 
 RUN ls -al /workspace/build/
 
