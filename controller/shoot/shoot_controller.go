@@ -30,8 +30,7 @@ type ShootController struct {
 	GreenhouseClient client.Client
 	GardenClient     client.Client
 	logr.Logger
-	Name string
-	// TODO: Check for namespaced Garden Client for the shoot controller
+	Name            string
 	CareInstruction *v1alpha1.CareInstruction
 }
 
