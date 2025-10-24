@@ -53,8 +53,8 @@ type CareInstructionSpec struct {
 	// ShootSelector is a label selector targeting shoots that should be reconciled.
 	ShootSelector *metav1.LabelSelector `json:"shootSelector,omitempty"`
 
-	// TransportLabels is a list of labels that will be transported from shoot to Greenhouse Cluster.
-	TransportLabels []string `json:"transportLabels,omitempty"`
+	// PropagateLabels is a list of labels that will be propagated from shoot to Greenhouse Cluster.
+	PropagateLabels []string `json:"propagateLabels,omitempty"`
 
 	// AdditionalLabels are labels that will be added to every Greenhouse Cluster created by this CareInstruction.
 	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`

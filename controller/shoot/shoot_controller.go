@@ -77,7 +77,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	labelPropagateString := v1alpha1.CareInstructionLabel + ","
 	// get labels specified via TransportLabels on the CareInstruction from the shoot
-	for _, v := range r.CareInstruction.Spec.TransportLabels {
+	for _, v := range r.CareInstruction.Spec.PropagateLabels {
 		if labelValue, ok := shoot.Labels[v]; ok {
 			labels[v] = labelValue
 			labelPropagateString += v + ","

@@ -154,7 +154,7 @@ var _ = Describe("CareInstruction Controller", func() {
 							"foo": "bar",
 						},
 					},
-					TransportLabels: []string{
+					PropagateLabels: []string{
 						"foo",
 						"baz",
 					},
@@ -465,7 +465,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					ShootSelector: &metav1.LabelSelector{},
-					TransportLabels: []string{
+					PropagateLabels: []string{
 						"foo",
 						"baz",
 					},

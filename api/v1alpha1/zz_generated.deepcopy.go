@@ -77,8 +77,8 @@ func (in *CareInstructionSpec) DeepCopyInto(out *CareInstructionSpec) {
 		*out = new(v1.LabelSelector)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.TransportLabels != nil {
-		in, out := &in.TransportLabels, &out.TransportLabels
+	if in.PropagateLabels != nil {
+		in, out := &in.PropagateLabels, &out.PropagateLabels
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}

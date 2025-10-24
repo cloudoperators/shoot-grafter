@@ -81,6 +81,12 @@ spec:
                 description: GardenNamespace is the namespace in which Greenhouse
                   will look for shoots on the seed cluster.
                 type: string
+              propagateLabels:
+                description: PropagateLabels is a list of labels that will be propagated
+                  from shoot to Greenhouse Cluster.
+                items:
+                  type: string
+                type: array
               shootSelector:
                 description: ShootSelector is a label selector targeting shoots that
                   should be reconciled.
@@ -128,12 +134,6 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              transportLabels:
-                description: TransportLabels is a list of labels that will be transported
-                  from shoot to Greenhouse Cluster.
-                items:
-                  type: string
-                type: array
             required:
             - gardenNamespace
             type: object
