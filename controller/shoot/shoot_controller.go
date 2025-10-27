@@ -157,6 +157,15 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
+	if !r.CareInstruction.Spec.DisableRBAC {
+		shootClient, err := getShootClusterClient(ctx, r.GardenClient, &shoot)
+		if err != nil {
+			r.Error(err, "unable to get Shoot cluster client", "name", shoot.Name)
+			return ctrl.Result{}, err
+		}
+		r.setRBAC(ctx, shootClient, shoot.GetName())
+	}
+
 	return ctrl.Result{}, nil
 }
 

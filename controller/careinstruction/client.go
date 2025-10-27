@@ -10,6 +10,7 @@ import (
 	"shoot-grafter/api/v1alpha1"
 
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	gardenerAuthenticationv1alpha1 "github.com/gardener/gardener/pkg/apis/authentication/v1alpha1"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// GetGardenClusterAccess retrieves the rest.Config and scheme for the garden cluster. We do not return a client.Client here, since we build a manager later.
 func (r *CareInstructionReconciler) GetGardenClusterAccess(ctx context.Context, careInstruction *v1alpha1.CareInstruction) (rest.Config, *runtime.Scheme, error) {
 	gardenCluster := greenhousev1alpha1.Cluster{}
 	var (
@@ -60,6 +62,9 @@ func (r *CareInstructionReconciler) GetGardenClusterAccess(ctx context.Context, 
 		return *gardenClientConfig, nil, err
 	}
 	if err := gardenerv1beta1.AddToScheme(scheme); err != nil {
+		return *gardenClientConfig, nil, err
+	}
+	if err := gardenerAuthenticationv1alpha1.AddToScheme(scheme); err != nil {
 		return *gardenClientConfig, nil, err
 	}
 	return *gardenClientConfig, scheme, nil
