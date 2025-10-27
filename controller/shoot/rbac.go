@@ -18,7 +18,6 @@ const (
 // This currently defaults to cluster-admin permissions
 // TODO: expose possibility to spec finegrained permissions for the Greenhouse controller
 func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client, shootName string) {
-
 	greenhouseOrg := r.CareInstruction.GetNamespace()
 	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -28,7 +27,7 @@ func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client
 			{
 				Kind:     "User",
 				APIGroup: "rbac.authorization.k8s.io",
-				Name:     fmt.Sprintf(greenhouseSATemplate, greenhouseOrg, &shootName),
+				Name:     fmt.Sprintf(greenhouseSATemplate, greenhouseOrg, shootName),
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
@@ -37,7 +36,7 @@ func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client
 			Name:     "cluster-admin",
 		},
 	}
-	if err := r.GreenhouseClient.Create(ctx, clusterRoleBinding); err != nil {
+	if err := shootClient.Create(ctx, clusterRoleBinding); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			r.Error(err, "failed to create ClusterRoleBinding for Greenhouse ServiceAccount", "ClusterRoleBinding", clusterRoleBinding.Name)
 		} else {
@@ -46,5 +45,4 @@ func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client
 	} else {
 		r.Info("Created ClusterRoleBinding for Greenhouse ServiceAccount", "ClusterRoleBinding", clusterRoleBinding.Name)
 	}
-
 }

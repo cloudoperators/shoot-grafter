@@ -15,7 +15,6 @@ import (
 )
 
 func getShootClusterClient(ctx context.Context, gardenClient client.Client, shoot *gardenerv1beta1.Shoot) (client.Client, error) {
-
 	expiration := 10 * time.Minute
 	expirationSeconds := int64(expiration.Seconds())
 	adminKubeconfigRequest := &gardenerAuthenticationv1alpha1.AdminKubeconfigRequest{
@@ -44,10 +43,10 @@ func getShootClusterClient(ctx context.Context, gardenClient client.Client, shoo
 		return nil, err
 	}
 
-	client, err := client.New(restCfg, client.Options{Scheme: scheme})
+	shootClient, err := client.New(restCfg, client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, err
 	}
 
-	return client, nil
+	return shootClient, nil
 }
