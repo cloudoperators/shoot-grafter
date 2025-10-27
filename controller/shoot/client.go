@@ -8,6 +8,7 @@ import (
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
@@ -40,6 +41,9 @@ func getShootClusterClient(ctx context.Context, gardenClient client.Client, shoo
 
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+	if err := rbacv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 
