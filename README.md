@@ -15,7 +15,7 @@ shoot-grafter continuously monitors Garden clusters for Shoots matching specific
 1. **Discovers Shoots**: Watches for Gardener Shoot resources in specified namespaces based on label selectors
 2. **Extracts cluster credentials**: Retrieves API server URLs and CA certificates from Shoot resources
 3. **Creates Greenhouse Clusters**: Automatically registers discovered Shoots as Greenhouse Cluster resources
-4. **Propagates metadata**: Transfers labels and annotations from Shoots to Greenhouse Clusters for consistent organization
+4. **Propagates labels**: Transfers specified labels from Shoots to Greenhouse Clusters for consistent organization
 5. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
 6. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
 
@@ -47,7 +47,7 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Watches Shoot resources in the specified Garden cluster namespace
 - Extracts cluster connection details (API server URL, CA certificate)
 - Creates or updates corresponding Secret resources with OIDC configuration
-- Generates Greenhouse Cluster resources with appropriate labels and annotations
+- Generates Greenhouse Cluster resources with appropriate labels
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
 
 ## Custom Resource: CareInstruction
