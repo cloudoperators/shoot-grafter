@@ -39,6 +39,8 @@ var _ = Describe("CareInstruction Controller", func() {
 		skipNameValidation := true // Skip name validation for the controller
 		host := test.TestEnv.WebhookInstallOptions.LocalServingHost
 		port := test.TestEnv.WebhookInstallOptions.LocalServingPort
+
+		// Create a manager for the Garden cluster (where the ShootController watches Shoots)
 		mgr, err := ctrl.NewManager(test.GardenCfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Metrics: server.Options{
@@ -54,13 +56,26 @@ var _ = Describe("CareInstruction Controller", func() {
 			}),
 			LeaderElection: false,
 		})
-		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the manager")
+		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the garden manager")
+
+		// Create a manager for the Greenhouse cluster (where events should be emitted)
+		greenhouseMgr, err := ctrl.NewManager(test.Cfg, ctrl.Options{
+			Scheme: scheme.Scheme,
+			Metrics: server.Options{
+				BindAddress: "0", // Disable metrics
+			},
+			LeaderElection: false,
+		})
+		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager")
+
+		// Create ShootController with EventRecorder from Greenhouse manager
 		Expect((&shoot.ShootController{
 			GreenhouseClient: test.K8sClient,
 			GardenClient:     test.GardenK8sClient,
 			Logger:           ctrl.Log.WithName("controllers").WithName("ShootController"),
 			Name:             "ShootController",
 			CareInstruction:  careInstruction,
+			EventRecorder:    greenhouseMgr.GetEventRecorderFor("ShootController"), // Get EventRecorder from Greenhouse manager
 		}).SetupWithManager(mgr)).To(Succeed(), "there must be no error setting up the controller with the manager")
 
 		careInstructionWebhook := &webhookv1alpha1.CareInstructionWebhook{}
@@ -135,6 +150,21 @@ var _ = Describe("CareInstruction Controller", func() {
 			}
 			return len(configMaps.Items) == 0 // Only the garden cluster ConfigMap should remain
 		}).Should(BeTrue(), "should eventually not find ConfigMap resources")
+
+		// Clean up any Events created during the tests
+		events := &corev1.EventList{}
+		Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list Events")
+		for _, event := range events.Items {
+			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &event))).To(Succeed(), "should delete Event resource")
+		}
+		Eventually(func(g Gomega) bool {
+			events := &corev1.EventList{}
+			err := test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))
+			if err != nil {
+				return false
+			}
+			return len(events.Items) == 0
+		}).Should(BeTrue(), "should eventually not find Event resources")
 
 		// stop the manager
 		mgrCancel()
@@ -535,6 +565,369 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(secret.Data).To(HaveKeyWithValue("ca.crt", []byte(base64.StdEncoding.EncodeToString([]byte("test-ca-data")))), "should have the expected data")
 				return true
 			}).Should(BeTrue(), "should eventually find the expected Secret")
+		})
+	})
+
+	FWhen("testing event recording", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-events",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "events",
+						},
+					},
+				},
+			}
+		})
+
+		It("should emit ShootReconciling and ShootReconciled events for successful reconciliation", func() {
+			// Create a shoot that matches the selector
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-events",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "events",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-events.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create ConfigMap with CA data
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-events.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// Eventually check for events
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				// Check for ShootReconciling event
+				hasReconcilingEvent := false
+				hasReconciledEvent := false
+				hasSecretCreatedEvent := false
+
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" {
+						if event.Reason == "ShootReconciling" && event.Type == corev1.EventTypeNormal {
+							g.Expect(event.Message).To(ContainSubstring("Reconciling shoot default/test-shoot-events"))
+							hasReconcilingEvent = true
+						}
+						if event.Reason == "ShootReconciled" && event.Type == corev1.EventTypeNormal {
+							g.Expect(event.Message).To(ContainSubstring("Successfully reconciled shoot default/test-shoot-events"))
+							hasReconciledEvent = true
+						}
+						if event.Reason == "SecretCreated" && event.Type == corev1.EventTypeNormal {
+							g.Expect(event.Message).To(ContainSubstring("Created Greenhouse secret test-shoot-events"))
+							g.Expect(event.Message).To(ContainSubstring("https://api-server.test-shoot-events.example.com"))
+							hasSecretCreatedEvent = true
+						}
+					}
+				}
+
+				return hasReconcilingEvent && hasReconciledEvent && hasSecretCreatedEvent
+			}).Should(BeTrue(), "should eventually find all expected events")
+		})
+
+		It("should emit APIServerURLMissing warning event when API server URL is not found", func() {
+			// Create a shoot without advertised addresses
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-no-url",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "events",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			// No advertised addresses set in status
+
+			// Eventually check for warning event
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasWarningEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "APIServerURLMissing" &&
+						event.Type == corev1.EventTypeWarning {
+						g.Expect(event.Message).To(ContainSubstring("No external API server URL found for shoot default/test-shoot-no-url"))
+						hasWarningEvent = true
+					}
+				}
+
+				return hasWarningEvent
+			}).Should(BeTrue(), "should eventually find APIServerURLMissing warning event")
+		})
+
+		It("should emit CAConfigMapFetchFailed warning event when CA ConfigMap is missing", func() {
+			// Create a shoot with advertised address but without CA ConfigMap
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-no-cm",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "events",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-no-cm.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Don't create the ConfigMap - this will cause the fetch to fail
+
+			// Eventually check for warning event
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasWarningEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "CAConfigMapFetchFailed" &&
+						event.Type == corev1.EventTypeWarning {
+						g.Expect(event.Message).To(ContainSubstring("Failed to fetch CA ConfigMap for shoot default/test-shoot-no-cm"))
+						hasWarningEvent = true
+					}
+				}
+
+				return hasWarningEvent
+			}).Should(BeTrue(), "should eventually find CAConfigMapFetchFailed warning event")
+		})
+
+		It("should emit CADataMissing warning event when CA data is empty", func() {
+			// Create a shoot with advertised address
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-empty-ca",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "events",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-empty-ca.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create ConfigMap without CA data
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-empty-ca.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					// Empty data
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// Eventually check for warning event
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasWarningEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "CADataMissing" &&
+						event.Type == corev1.EventTypeWarning {
+						g.Expect(event.Message).To(ContainSubstring("No CA data found in ConfigMap"))
+						g.Expect(event.Message).To(ContainSubstring("for shoot default/test-shoot-empty-ca"))
+						hasWarningEvent = true
+					}
+				}
+
+				return hasWarningEvent
+			}).Should(BeTrue(), "should eventually find CADataMissing warning event")
+		})
+
+		It("should emit SecretUpdated event when secret is updated", func() {
+			// Create a shoot with all required resources
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-update",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "events",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-update.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create ConfigMap with CA data
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-update.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data-v1",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// Wait for secret to be created
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-update",
+					Namespace: "default",
+				}, secret)
+				return err == nil
+			}).Should(BeTrue(), "should eventually create secret")
+
+			// Update the ConfigMap
+			cm.Data["ca.crt"] = "test-ca-data-v2"
+			Expect(test.GardenK8sClient.Update(test.Ctx, cm)).To(Succeed(), "should update ConfigMap resource")
+
+			// Trigger reconciliation by updating shoot
+			shoot.Labels["trigger"] = "update"
+			Expect(test.GardenK8sClient.Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot to trigger reconciliation")
+
+			// Eventually check for SecretUpdated event
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasUpdatedEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "SecretUpdated" &&
+						event.Type == corev1.EventTypeNormal {
+						g.Expect(event.Message).To(ContainSubstring("Updated Greenhouse secret test-shoot-update"))
+						g.Expect(event.Message).To(ContainSubstring("https://api-server.test-shoot-update.example.com"))
+						hasUpdatedEvent = true
+					}
+				}
+
+				return hasUpdatedEvent
+			}).Should(BeTrue(), "should eventually find SecretUpdated event")
+		})
+
+		It("should emit ShootDeleted event when shoot is deleted", func() {
+			// Create and then delete a shoot
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-delete",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "events",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-delete.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create ConfigMap with CA data
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-delete.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// Wait for initial reconciliation
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-delete",
+					Namespace: "default",
+				}, secret)
+				return err == nil
+			}).Should(BeTrue(), "should eventually create secret")
+
+			// Delete the shoot
+			Expect(test.GardenK8sClient.Delete(test.Ctx, shoot)).To(Succeed(), "should delete Shoot resource")
+
+			// Eventually check for ShootDeleted event
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasDeletedEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "ShootDeleted" &&
+						event.Type == corev1.EventTypeNormal {
+						g.Expect(event.Message).To(ContainSubstring("Shoot default/test-shoot-delete was deleted"))
+						hasDeletedEvent = true
+					}
+				}
+
+				return hasDeletedEvent
+			}).Should(BeTrue(), "should eventually find ShootDeleted event")
 		})
 	})
 })

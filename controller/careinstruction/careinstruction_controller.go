@@ -56,6 +56,7 @@ type careInstructionContextKey struct{}
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Setup the controller with the manager
@@ -270,12 +271,14 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 
 	// Register the ShootController with the garden manager
+	// Note: EventRecorder is obtained from the Greenhouse manager (r.Manager) to emit events on the Greenhouse cluster
 	sc := &shoot.ShootController{
 		GreenhouseClient: r.Client,
 		GardenClient:     gardenClient,
 		Logger:           r.WithValues("careInstruction", careInstruction.Name),
 		Name:             shoot.GenerateName(careInstruction.Name),
 		CareInstruction:  careInstruction.DeepCopy(),
+		EventRecorder:    r.Manager.GetEventRecorderFor(shoot.GenerateName(careInstruction.Name)),
 	}
 	if err := sc.SetupWithManager(shootControllerMgr); err != nil {
 		return err
@@ -312,6 +315,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	return nil
 }
 
+// TODO: add names of ready and not ready clusters to status
 // reconcileShootsNClusters - reconciles the clusters created and owned by this CareInstruction.
 func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Reconciling shoots and clusters for CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)

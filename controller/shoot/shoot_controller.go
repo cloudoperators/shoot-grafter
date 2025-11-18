@@ -34,7 +34,16 @@ type ShootController struct {
 	logr.Logger
 	Name            string
 	CareInstruction *v1alpha1.CareInstruction
-	EventRecorder   record.EventRecorder
+	EventRecorder   record.EventRecorder // EventRecorder to emit events on the Greenhouse cluster
+}
+
+// emitEvent safely emits an event if EventRecorder is available
+func (r *ShootController) emitEvent(object client.Object, eventType, reason, message string) {
+	if r.EventRecorder != nil {
+		r.EventRecorder.Event(object, eventType, reason, message)
+	} else {
+		r.Info("Event (EventRecorder not available)", "type", eventType, "reason", reason, "message", message)
+	}
 }
 
 func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
@@ -44,9 +53,9 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	// Initialize the EventRecorder if not already set
+	// Log missing event recorder
 	if r.EventRecorder == nil {
-		r.EventRecorder = mgr.GetEventRecorderFor(r.Name)
+		r.Error(nil, "EventRecorder is not set for ShootController", "name", r.Name)
 	}
 
 	// Setup the shoot controller with the manager
@@ -61,17 +70,17 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	var shoot gardenerv1beta1.Shoot
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, &shoot); err != nil {
-		r.Error(err, "unable to fetch Shoot")
+		r.Info("unable to fetch Shoot")
 		if client.IgnoreNotFound(err) == nil {
 			// Shoot was deleted
-			r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeNormal, "ShootDeleted",
+			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootDeleted",
 				fmt.Sprintf("Shoot %s/%s was deleted", req.Namespace, req.Name))
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// Emit event for shoot reconciliation start
-	r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciling",
+	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciling",
 		fmt.Sprintf("Reconciling shoot %s/%s", shoot.Namespace, shoot.Name))
 	apiServerURL := ""
 	// ApiServerURL is the Advertised Address with .name="external".
@@ -83,8 +92,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 	if apiServerURL == "" {
-		r.Error(nil, "no external API server URL found for Shoot", "name", shoot.Name)
-		r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeWarning, "APIServerURLMissing",
+		r.Info("no external API server URL found for Shoot", "name", shoot.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "APIServerURLMissing",
 			fmt.Sprintf("No external API server URL found for shoot %s/%s", shoot.Namespace, shoot.Name))
 		return ctrl.Result{}, nil
 	}
@@ -118,16 +127,16 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// and the labels from the CareInstruction
 	var cm corev1.ConfigMap
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: shoot.Namespace, Name: shoot.Name + shootCACMSuffix}, &cm); err != nil {
-		r.Error(err, "unable to fetch CA ConfigMap for Shoot")
-		r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeWarning, "CAConfigMapFetchFailed",
+		r.Info("unable to fetch CA ConfigMap for Shoot")
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CAConfigMapFetchFailed",
 			fmt.Sprintf("Failed to fetch CA ConfigMap for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 		return ctrl.Result{}, err
 	}
 
 	CAData := cm.Data["ca.crt"]
 	if CAData == "" {
-		r.Error(nil, "no CA data found in ConfigMap for Shoot", "name", cm.Name)
-		r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeWarning, "CADataMissing",
+		r.Info("no CA data found in ConfigMap for Shoot", "name", cm.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CADataMissing",
 			fmt.Sprintf("No CA data found in ConfigMap %s for shoot %s/%s", cm.Name, shoot.Namespace, shoot.Name))
 		return ctrl.Result{}, nil
 	}
@@ -157,20 +166,20 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return nil
 	})
 	if err != nil {
-		r.Error(err, "unable to create or update Secret for Shoot", "name", shoot.Name)
-		r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
+		r.Info("unable to create or update Secret for Shoot", "name", shoot.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
 			fmt.Sprintf("Failed to create or update secret for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 		return ctrl.Result{}, err
 	}
 	switch result {
 	case controllerutil.OperationResultCreated:
 		r.Info("Secret for Shoot created", "name", shoot.Name)
-		r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeNormal, "SecretCreated",
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "SecretCreated",
 			fmt.Sprintf("Created Greenhouse secret %s for shoot %s/%s with API server URL %s",
 				secret.Name, shoot.Namespace, shoot.Name, apiServerURL))
 	case controllerutil.OperationResultUpdated:
 		r.Info("Secret for Shoot updated", "name", shoot.Name)
-		r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeNormal, "SecretUpdated",
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "SecretUpdated",
 			fmt.Sprintf("Updated Greenhouse secret %s for shoot %s/%s with API server URL %s",
 				secret.Name, shoot.Namespace, shoot.Name, apiServerURL))
 	case controllerutil.OperationResultNone:
@@ -179,7 +188,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("Secret for Shoot processed", "name", shoot.Name, "result", result)
 	}
 
-	r.EventRecorder.Event(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciled",
+	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciled",
 		fmt.Sprintf("Successfully reconciled shoot %s/%s", shoot.Namespace, shoot.Name))
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
