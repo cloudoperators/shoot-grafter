@@ -50,6 +50,13 @@ spec:
                       properties:
                         enableBasicAuthentication:
                           type: boolean
+                        structuredAuthentication:
+                          type: object
+                          description: Configuration for structured authentication
+                          properties:
+                            configMapName:
+                              type: string
+                              description: Name of the ConfigMap containing the authentication configuration
                     kubeControllerManager:
                       type: object
                     kubeScheduler:

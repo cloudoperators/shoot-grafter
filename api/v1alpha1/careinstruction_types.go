@@ -58,6 +58,11 @@ type CareInstructionSpec struct {
 
 	// AdditionalLabels are labels that will be added to every Greenhouse Cluster created by this CareInstruction.
 	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`
+
+	// GreenhouseIssuerUrl is the OIDC issuer URL for Greenhouse authentication.
+	// When set, the shoot controller will create/update an AuthenticationConfiguration ConfigMap
+	// in the Garden cluster and configure the Shoot to use it for OIDC authentication.
+	GreenhouseIssuerUrl string `json:"greenhouseIssuerUrl,omitempty"`
 }
 
 // CareInstructionStatus holds the status of the CareInstruction.

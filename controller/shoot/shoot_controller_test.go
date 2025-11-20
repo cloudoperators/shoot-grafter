@@ -19,12 +19,14 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiserverv1beta1 "k8s.io/apiserver/pkg/apis/apiserver/v1beta1"
 	"k8s.io/kubectl/pkg/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -568,7 +570,325 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
-	FWhen("testing event recording", func() {
+	When("testing OIDC configuration", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-oidc",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "oidc",
+						},
+					},
+					GreenhouseIssuerUrl: "https://greenhouse.test.example.com",
+				},
+			}
+		})
+
+		It("should create AuthenticationConfiguration ConfigMap for shoot", func() {
+			// Create a shoot that matches the selector
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "oidc",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-oidc.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create CA ConfigMap
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
+
+			// Eventually check that the OIDC AuthenticationConfiguration ConfigMap is created
+			Eventually(func(g Gomega) bool {
+				authConfigMap := &corev1.ConfigMap{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-greenhouse-auth",
+					Namespace: "default",
+				}, authConfigMap)
+				if err != nil {
+					return false
+				}
+
+				// Verify ConfigMap has config.yaml data
+				g.Expect(authConfigMap.Data).To(HaveKey("config.yaml"))
+
+				// Parse and verify the configuration
+				var authConfig apiserverv1beta1.AuthenticationConfiguration
+				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				g.Expect(authConfig.JWT).To(HaveLen(1))
+				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse.test.example.com"))
+				g.Expect(authConfig.JWT[0].Issuer.Audiences).To(ConsistOf("greenhouse"))
+				g.Expect(authConfig.JWT[0].ClaimMappings.Username.Claim).To(Equal("sub"))
+				g.Expect(authConfig.JWT[0].ClaimMappings.Username.Prefix).NotTo(BeNil())
+				g.Expect(*authConfig.JWT[0].ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
+
+				return true
+			}).Should(BeTrue(), "should eventually create OIDC AuthenticationConfiguration ConfigMap")
+
+			// Verify shoot spec was updated with ConfigMap reference
+			Eventually(func(g Gomega) bool {
+				updatedShoot := &gardenerv1beta1.Shoot{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc",
+					Namespace: "default",
+				}, updatedShoot)
+				if err != nil {
+					return false
+				}
+
+				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer).NotTo(BeNil())
+				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication).NotTo(BeNil())
+				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication.ConfigMapName).To(Equal("test-shoot-oidc-greenhouse-auth"))
+
+				return true
+			}).Should(BeTrue(), "should eventually update shoot spec with ConfigMap reference")
+		})
+
+		It("should update existing OIDC configuration when greenhouse issuer changes", func() {
+			// Create a shoot with existing OIDC config
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-update",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "oidc",
+					},
+				},
+				Spec: gardenerv1beta1.ShootSpec{
+					Kubernetes: gardenerv1beta1.Kubernetes{
+						KubeAPIServer: &gardenerv1beta1.KubeAPIServerConfig{
+							StructuredAuthentication: &gardenerv1beta1.StructuredAuthentication{
+								ConfigMapName: "test-shoot-oidc-update-auth",
+							},
+						},
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-oidc-update.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create existing auth ConfigMap with old greenhouse config
+			existingAuthCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-update-auth",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.test.example.com
+    audiences:
+    - old-audience
+  claimMappings:
+    username:
+      claim: email
+`,
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, existingAuthCM)).To(Succeed(), "should create existing auth ConfigMap")
+
+			// Create CA ConfigMap
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-update.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
+
+			// Eventually verify the auth ConfigMap was updated with correct greenhouse config
+			Eventually(func(g Gomega) bool {
+				authConfigMap := &corev1.ConfigMap{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-update-auth",
+					Namespace: "default",
+				}, authConfigMap)
+				if err != nil {
+					return false
+				}
+
+				// Parse and verify the configuration was updated
+				var authConfig apiserverv1beta1.AuthenticationConfiguration
+				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// Should have one issuer (greenhouse, updated)
+				g.Expect(authConfig.JWT).To(HaveLen(1))
+				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse.test.example.com"))
+				g.Expect(authConfig.JWT[0].Issuer.Audiences).To(ConsistOf("greenhouse"))
+				g.Expect(authConfig.JWT[0].ClaimMappings.Username.Claim).To(Equal("sub"))
+				g.Expect(authConfig.JWT[0].ClaimMappings.Username.Prefix).NotTo(BeNil())
+				g.Expect(*authConfig.JWT[0].ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
+
+				return true
+			}).Should(BeTrue(), "should eventually update existing OIDC configuration")
+		})
+
+		It("should preserve other issuers when adding greenhouse issuer", func() {
+			// Create a shoot with existing OIDC config containing other issuers
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-preserve",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "oidc",
+					},
+				},
+				Spec: gardenerv1beta1.ShootSpec{
+					Kubernetes: gardenerv1beta1.Kubernetes{
+						KubeAPIServer: &gardenerv1beta1.KubeAPIServerConfig{
+							StructuredAuthentication: &gardenerv1beta1.StructuredAuthentication{
+								ConfigMapName: "test-shoot-oidc-preserve-auth",
+							},
+						},
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-oidc-preserve.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create existing auth ConfigMap with other issuers
+			existingAuthCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-preserve-auth",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://other-issuer1.example.com
+    audiences:
+    - issuer1
+  claimMappings:
+    username:
+      claim: sub
+- issuer:
+    url: https://other-issuer2.example.com
+    audiences:
+    - issuer2
+  claimMappings:
+    username:
+      claim: sub
+`,
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, existingAuthCM)).To(Succeed(), "should create existing auth ConfigMap")
+
+			// Create CA ConfigMap
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-preserve.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
+
+			// Eventually verify the auth ConfigMap was updated with greenhouse issuer added
+			Eventually(func(g Gomega) bool {
+				authConfigMap := &corev1.ConfigMap{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-preserve-auth",
+					Namespace: "default",
+				}, authConfigMap)
+				if err != nil {
+					return false
+				}
+
+				// Parse and verify the configuration
+				var authConfig apiserverv1beta1.AuthenticationConfiguration
+				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// Should have three issuers now (two original + greenhouse)
+				g.Expect(authConfig.JWT).To(HaveLen(3))
+
+				// Verify other issuers are preserved
+				foundIssuer1 := false
+				foundIssuer2 := false
+				foundGreenhouse := false
+
+				for _, issuer := range authConfig.JWT {
+					switch issuer.Issuer.URL {
+					case "https://other-issuer1.example.com":
+						foundIssuer1 = true
+						g.Expect(issuer.Issuer.Audiences).To(ConsistOf("issuer1"))
+					case "https://other-issuer2.example.com":
+						foundIssuer2 = true
+						g.Expect(issuer.Issuer.Audiences).To(ConsistOf("issuer2"))
+					case "https://greenhouse.test.example.com":
+						foundGreenhouse = true
+						g.Expect(issuer.Issuer.Audiences).To(ConsistOf("greenhouse"))
+						g.Expect(issuer.ClaimMappings.Username.Claim).To(Equal("sub"))
+						g.Expect(issuer.ClaimMappings.Username.Prefix).NotTo(BeNil())
+						g.Expect(*issuer.ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
+					}
+				}
+
+				g.Expect(foundIssuer1).To(BeTrue(), "should preserve issuer1")
+				g.Expect(foundIssuer2).To(BeTrue(), "should preserve issuer2")
+				g.Expect(foundGreenhouse).To(BeTrue(), "should add greenhouse issuer")
+
+				return true
+			}).Should(BeTrue(), "should eventually add greenhouse issuer while preserving others")
+		})
+	})
+
+	When("testing event recording", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{

@@ -188,6 +188,16 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("Secret for Shoot processed", "name", shoot.Name, "result", result)
 	}
 
+	// Configure OIDC authentication if GreenhouseIssuerUrl is set
+	if r.CareInstruction.Spec.GreenhouseIssuerUrl != "" {
+		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
+			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
+				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
+			return ctrl.Result{}, err
+		}
+	}
+
 	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciled",
 		fmt.Sprintf("Successfully reconciled shoot %s/%s", shoot.Namespace, shoot.Name))
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)

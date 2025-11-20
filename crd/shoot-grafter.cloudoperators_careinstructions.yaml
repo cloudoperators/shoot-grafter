@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
-# SPDX-License-Identifier: Apache-2.0
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -78,11 +75,17 @@ spec:
                 description: |-
                   GardenClusterName is the name of the Greenhouse Cluster representing the Gardener seed cluster from which the shoots will be reconciled.
                   This is mutually exclusive to referring to the GardenCluster by a kubeconfig secret via GardenClusterKubeConfigSecretName.
-                  Order is 1. GardenClusterKubeConfigSecretName 2. GardenClusterNames
+                  Order is 1. GardenClusterKubeConfigSecretName 2. GardenClusterName
                 type: string
               gardenNamespace:
                 description: GardenNamespace is the namespace in which Greenhouse
                   will look for shoots on the seed cluster.
+                type: string
+              greenhouseIssuerUrl:
+                description: |-
+                  GreenhouseIssuerUrl is the OIDC issuer URL for Greenhouse authentication.
+                  When set, the shoot controller will create/update an AuthenticationConfiguration ConfigMap
+                  in the Garden cluster and configure the Shoot to use it for OIDC authentication.
                 type: string
               propagateLabels:
                 description: PropagateLabels is a list of labels that will be propagated
