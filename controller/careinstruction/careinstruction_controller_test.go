@@ -568,6 +568,179 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
+	Context("When clusters have different ready states", func() {
+		It("should correctly populate ReadyClusterNames and NotReadyClusterNames status fields", func() {
+			By("Creating three shoots on the garden cluster")
+			shoot1 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ready-shoot-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "cluster-names",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot1)).To(Succeed(), "should create first shoot")
+
+			shoot2 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ready-shoot-2",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "cluster-names",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot2)).To(Succeed(), "should create second shoot")
+
+			shoot3 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "not-ready-shoot",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "cluster-names",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot3)).To(Succeed(), "should create third shoot")
+
+			By("Creating a CareInstruction targeting these shoots")
+			careInstruction := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cluster-names",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "cluster-names",
+						},
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed(), "should create CareInstruction")
+
+			By("Creating clusters - two ready and one not ready")
+			cluster1 := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot1.Name,
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{
+					AccessMode: greenhousev1alpha1.ClusterAccessModeDirect,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster1)).To(Succeed(), "should create first cluster")
+			cluster1.Status.SetConditions(
+				greenhousemetav1alpha1.NewCondition(
+					greenhousemetav1alpha1.ReadyCondition,
+					metav1.ConditionTrue,
+					"ClusterReady",
+					"Cluster is ready",
+				),
+			)
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster1)).To(Succeed(), "should set first cluster to ready")
+
+			cluster2 := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot2.Name,
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{
+					AccessMode: greenhousev1alpha1.ClusterAccessModeDirect,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster2)).To(Succeed(), "should create second cluster")
+			cluster2.Status.SetConditions(
+				greenhousemetav1alpha1.NewCondition(
+					greenhousemetav1alpha1.ReadyCondition,
+					metav1.ConditionTrue,
+					"ClusterReady",
+					"Cluster is ready",
+				),
+			)
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster2)).To(Succeed(), "should set second cluster to ready")
+
+			cluster3 := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot3.Name,
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{
+					AccessMode: greenhousev1alpha1.ClusterAccessModeDirect,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster3)).To(Succeed(), "should create third cluster")
+			// Don't set cluster3 to ready - leave it in not-ready state
+
+			By("Verifying the status fields are populated correctly")
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed(), "should get CareInstruction")
+
+				// Verify counts
+				g.Expect(careInstruction.Status.TotalShoots).To(Equal(3), "should have 3 total shoots")
+				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(3), "should have 3 created clusters")
+				g.Expect(careInstruction.Status.FailedClusters).To(Equal(1), "should have 1 failed cluster")
+
+				// Verify ReadyClusterNames contains the two ready clusters
+				g.Expect(careInstruction.Status.ReadyClusterNames).To(HaveLen(2), "should have 2 ready cluster names")
+				g.Expect(careInstruction.Status.ReadyClusterNames).To(ContainElements(shoot1.Name, shoot2.Name), "should contain names of ready clusters")
+
+				// Verify NotReadyClusterNames contains the not-ready cluster
+				g.Expect(careInstruction.Status.NotReadyClusterNames).To(HaveLen(1), "should have 1 not-ready cluster name")
+				g.Expect(careInstruction.Status.NotReadyClusterNames).To(ContainElement(shoot3.Name), "should contain name of not-ready cluster")
+
+				return true
+			}).Should(BeTrue(), "should eventually have correct cluster names in status")
+
+			By("Setting the third cluster to ready and verifying status updates")
+			cluster3.Status.SetConditions(
+				greenhousemetav1alpha1.NewCondition(
+					greenhousemetav1alpha1.ReadyCondition,
+					metav1.ConditionTrue,
+					"ClusterReady",
+					"Cluster is ready",
+				),
+			)
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster3)).To(Succeed(), "should set third cluster to ready")
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed(), "should get CareInstruction")
+
+				// Verify all clusters are now ready
+				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have 0 failed clusters")
+				g.Expect(careInstruction.Status.ReadyClusterNames).To(HaveLen(3), "should have 3 ready cluster names")
+				g.Expect(careInstruction.Status.ReadyClusterNames).To(ContainElements(shoot1.Name, shoot2.Name, shoot3.Name), "should contain all cluster names")
+				g.Expect(careInstruction.Status.NotReadyClusterNames).To(BeEmpty(), "should have no not-ready cluster names")
+
+				// Verify ShootsReconciled condition is true
+				for _, condition := range careInstruction.Status.Conditions {
+					if condition.Type == v1alpha1.ShootsReconciledCondition {
+						g.Expect(condition.Status).To(Equal(metav1.ConditionTrue), "should have ShootsReconciled condition set to true")
+					}
+				}
+
+				return true
+			}).Should(BeTrue(), "should eventually have all clusters ready")
+		})
+	})
+
 	Context("When a CareInstruction is deleted", func() {
 		It("should stop the Shoot controller", func() {
 			shoot := &gardenerv1beta1.Shoot{

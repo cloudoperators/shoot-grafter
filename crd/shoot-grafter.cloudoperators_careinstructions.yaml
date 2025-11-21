@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
-# SPDX-License-Identifier: Apache-2.0
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -78,7 +75,7 @@ spec:
                 description: |-
                   GardenClusterName is the name of the Greenhouse Cluster representing the Gardener seed cluster from which the shoots will be reconciled.
                   This is mutually exclusive to referring to the GardenCluster by a kubeconfig secret via GardenClusterKubeConfigSecretName.
-                  Order is 1. GardenClusterKubeConfigSecretName 2. GardenClusterNames
+                  Order is 1. GardenClusterKubeConfigSecretName 2. GardenClusterName
                 type: string
               gardenNamespace:
                 description: GardenNamespace is the namespace in which Greenhouse
@@ -160,6 +157,18 @@ spec:
                   by this CareInstruction were reconciled.
                 format: date-time
                 type: string
+              notReadyClusterNames:
+                description: NotReadyClusterNames is the list of cluster names that
+                  are not ready.
+                items:
+                  type: string
+                type: array
+              readyClusterNames:
+                description: ReadyClusterNames is the list of cluster names that are
+                  ready.
+                items:
+                  type: string
+                type: array
               statusConditions:
                 description: StatusConditions represent the latest available observations
                   of the CareInstruction's current state.
