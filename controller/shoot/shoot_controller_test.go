@@ -568,7 +568,7 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
-	FWhen("testing event recording", func() {
+	When("testing event recording", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
