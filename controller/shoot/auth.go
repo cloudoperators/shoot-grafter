@@ -6,6 +6,7 @@ package shoot
 import (
 	"context"
 	"fmt"
+	"shoot-grafter/api/v1alpha1"
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,13 +43,49 @@ func init() {
 	authCodecFactory = serializer.NewCodecFactory(authScheme)
 }
 
-// configureOIDCAuthentication configures OIDC authentication for the Shoot by creating/updating
-// an AuthenticationConfiguration ConfigMap and updating the Shoot spec to reference it
+// configureOIDCAuthentication configures OIDC authentication for the Shoot by:
+// 1. Fetching the AuthenticationConfiguration ConfigMap from Greenhouse cluster
+// 2. Merging it with any existing configuration on the Garden cluster
+// 3. Updating the Shoot spec to reference the merged configuration
 func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) error {
 
-	// init configMapName with default value
-	var configMapName = fmt.Sprintf("%s-greenhouse-auth", shoot.Name)
-	var useExistingConfigMap = false
+	// Fetch the AuthenticationConfiguration ConfigMap from Greenhouse cluster
+	var greenhouseAuthConfigMap corev1.ConfigMap
+	if err := r.GreenhouseClient.Get(ctx, client.ObjectKey{
+		Namespace: r.CareInstruction.Namespace,
+		Name:      r.CareInstruction.Spec.AuthenticationConfigMapRef,
+	}, &greenhouseAuthConfigMap); err != nil {
+		return fmt.Errorf("failed to fetch AuthenticationConfiguration ConfigMap %s from Greenhouse cluster: %w",
+			r.CareInstruction.Spec.AuthenticationConfigMapRef, err)
+	}
+
+	// Add the auth ConfigMap label if it doesn't exist
+	if greenhouseAuthConfigMap.Labels == nil {
+		greenhouseAuthConfigMap.Labels = make(map[string]string)
+	}
+	if _, hasLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasLabel {
+		greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+		if err := r.GreenhouseClient.Update(ctx, &greenhouseAuthConfigMap); err != nil {
+			r.Info("failed to add auth ConfigMap label", "configMap", greenhouseAuthConfigMap.Name, "error", err)
+			// Don't fail the reconciliation for this, just log it
+		}
+	}
+
+	// Verify the ConfigMap contains config.yaml
+	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data["config.yaml"] == "" {
+		return fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain config.yaml",
+			r.CareInstruction.Spec.AuthenticationConfigMapRef)
+	}
+
+	// Parse the Greenhouse authentication configuration
+	var greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration
+	if err := yaml.Unmarshal([]byte(greenhouseAuthConfigMap.Data["config.yaml"]), &greenhouseAuthConfig); err != nil {
+		return fmt.Errorf("failed to parse Greenhouse AuthenticationConfiguration: %w", err)
+	}
+
+	// Determine the ConfigMap name for Garden cluster
+	configMapName := fmt.Sprintf("%s-greenhouse-auth", shoot.Name)
+	useExistingConfigMap := false
 
 	// Check if Shoot already has a ConfigMap configured
 	if shoot.Spec.Kubernetes.KubeAPIServer != nil &&
@@ -59,21 +96,19 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		r.Info("Shoot already has AuthenticationConfiguration ConfigMap", "shoot", shoot.Name, "configMap", configMapName)
 	}
 
-	var configMap corev1.ConfigMap
+	var gardenConfigMap corev1.ConfigMap
 
 	if useExistingConfigMap {
-
-		// Fetch the existing ConfigMap
+		// Fetch the existing ConfigMap from Garden cluster
 		if err := r.GardenClient.Get(ctx, client.ObjectKey{
 			Namespace: shoot.Namespace,
 			Name:      configMapName,
-		}, &configMap); err != nil {
-			return fmt.Errorf("failed to fetch existing AuthenticationConfiguration ConfigMap %s: %w", configMapName, err)
+		}, &gardenConfigMap); err != nil {
+			return fmt.Errorf("failed to fetch existing AuthenticationConfiguration ConfigMap %s from Garden cluster: %w", configMapName, err)
 		}
-
 	} else {
-		// Create new ConfigMap with empty configuration
-		configMap = corev1.ConfigMap{
+		// Create new ConfigMap structure
+		gardenConfigMap = corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      configMapName,
 				Namespace: shoot.Namespace,
@@ -84,10 +119,9 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		}
 	}
 
-	// Create or update the ConfigMap with upsertGreenhouseIssuer modifying it
-	configMapResult, err := ctrl.CreateOrUpdate(ctx, r.GardenClient, &configMap, func() error {
-		// Update the ConfigMap data with Greenhouse issuer
-		return r.upsertGreenhouseIssuer(&configMap)
+	// Create or update the ConfigMap, merging configurations
+	configMapResult, err := ctrl.CreateOrUpdate(ctx, r.GardenClient, &gardenConfigMap, func() error {
+		return r.mergeAuthenticationConfigurations(&gardenConfigMap, &greenhouseAuthConfig)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create/update AuthenticationConfiguration ConfigMap: %w", err)
@@ -125,37 +159,23 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 	return nil
 }
 
-// createGreenhouseIssuerConfig creates a JWT issuer configuration for Greenhouse
-func (r *ShootController) createGreenhouseIssuerConfig() apiserverv1beta1.JWTAuthenticator {
-	prefix := greenhouseClaimPrefix
-	return apiserverv1beta1.JWTAuthenticator{
-		Issuer: apiserverv1beta1.Issuer{
-			URL:       r.CareInstruction.Spec.GreenhouseIssuerUrl,
-			Audiences: []string{greenhouseAudience},
-		},
-		ClaimMappings: apiserverv1beta1.ClaimMappings{
-			Username: apiserverv1beta1.PrefixedClaimOrExpression{
-				Claim:  "sub",
-				Prefix: &prefix,
-			},
-		},
-	}
-}
+// mergeAuthenticationConfigurations merges the Greenhouse AuthenticationConfiguration
+// with any existing configuration in the Garden ConfigMap. It intelligently merges:
+// - JWT authenticators from both configurations
+// - Deduplicates issuers by URL (Greenhouse config takes precedence)
+// - Preserves Garden-specific configurations that don't conflict
+func (r *ShootController) mergeAuthenticationConfigurations(gardenConfigMap *corev1.ConfigMap, greenhouseAuthConfig *apiserverv1beta1.AuthenticationConfiguration) error {
+	var gardenAuthConfig apiserverv1beta1.AuthenticationConfiguration
 
-// upsertGreenhouseIssuer modifies the ConfigMap to add or update the Greenhouse issuer.
-// It handles YAML unmarshaling, modification, and marshaling internally.
-func (r *ShootController) upsertGreenhouseIssuer(configMap *corev1.ConfigMap) error {
-	var authConfig apiserverv1beta1.AuthenticationConfiguration
-
-	// Parse existing configuration if present
-	if configMap.Data != nil && configMap.Data["config.yaml"] != "" {
-		existingConfigYAML := configMap.Data["config.yaml"]
-		if err := yaml.Unmarshal([]byte(existingConfigYAML), &authConfig); err != nil {
-			return fmt.Errorf("failed to parse existing AuthenticationConfiguration: %w", err)
+	// Parse existing Garden configuration if present
+	if gardenConfigMap.Data != nil && gardenConfigMap.Data["config.yaml"] != "" {
+		existingConfigYAML := gardenConfigMap.Data["config.yaml"]
+		if err := yaml.Unmarshal([]byte(existingConfigYAML), &gardenAuthConfig); err != nil {
+			return fmt.Errorf("failed to parse existing Garden AuthenticationConfiguration: %w", err)
 		}
 	} else {
-		// Create new configuration
-		authConfig = apiserverv1beta1.AuthenticationConfiguration{
+		// Create new configuration structure
+		gardenAuthConfig = apiserverv1beta1.AuthenticationConfiguration{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: apiserverv1beta1.SchemeGroupVersion.String(),
 				Kind:       "AuthenticationConfiguration",
@@ -164,41 +184,41 @@ func (r *ShootController) upsertGreenhouseIssuer(configMap *corev1.ConfigMap) er
 		}
 	}
 
-	if authConfig.JWT == nil {
-		authConfig.JWT = []apiserverv1beta1.JWTAuthenticator{}
+	if gardenAuthConfig.JWT == nil {
+		gardenAuthConfig.JWT = []apiserverv1beta1.JWTAuthenticator{}
 	}
 
-	greenhouseURL := r.CareInstruction.Spec.GreenhouseIssuerUrl
+	// Create a map of existing Garden issuer URLs for quick lookup
+	gardenIssuerURLs := make(map[string]int) // URL -> index in gardenAuthConfig.JWT
+	for i, jwtAuth := range gardenAuthConfig.JWT {
+		gardenIssuerURLs[jwtAuth.Issuer.URL] = i
+	}
 
-	// Check if Greenhouse issuer already exists
-	issuerFound := false
-	for i, jwtConfig := range authConfig.JWT {
-		if jwtConfig.Issuer.URL == greenhouseURL {
-			// Update existing issuer configuration
-			r.Info("Updating existing Greenhouse issuer configuration", "url", greenhouseURL)
-			authConfig.JWT[i] = r.createGreenhouseIssuerConfig()
-			issuerFound = true
-			break
+	// Merge JWT authenticators from Greenhouse configuration
+	// Greenhouse issuers take precedence over Garden issuers with the same URL
+	for _, greenhouseJWT := range greenhouseAuthConfig.JWT {
+		if existingIndex, exists := gardenIssuerURLs[greenhouseJWT.Issuer.URL]; exists {
+			// Update existing issuer with Greenhouse configuration
+			r.Info("Updating issuer from Greenhouse configuration", "url", greenhouseJWT.Issuer.URL)
+			gardenAuthConfig.JWT[existingIndex] = greenhouseJWT
+		} else {
+			// Add new issuer from Greenhouse configuration, no conflict since not added to gardenIssuerURLs map
+			r.Info("Adding new issuer from Greenhouse configuration", "url", greenhouseJWT.Issuer.URL)
+			gardenAuthConfig.JWT = append(gardenAuthConfig.JWT, greenhouseJWT)
 		}
 	}
 
-	if !issuerFound {
-		// Greenhouse issuer doesn't exist, add it
-		r.Info("Adding new Greenhouse issuer configuration", "url", greenhouseURL)
-		authConfig.JWT = append(authConfig.JWT, r.createGreenhouseIssuerConfig())
-	}
-
-	// Marshal back to YAML
-	configYAML, err := yaml.Marshal(&authConfig)
+	// Marshal merged configuration back to YAML
+	mergedConfigYAML, err := yaml.Marshal(&gardenAuthConfig)
 	if err != nil {
-		return fmt.Errorf("failed to marshal AuthenticationConfiguration: %w", err)
+		return fmt.Errorf("failed to marshal merged AuthenticationConfiguration: %w", err)
 	}
 
 	// Update ConfigMap data
-	if configMap.Data == nil {
-		configMap.Data = make(map[string]string)
+	if gardenConfigMap.Data == nil {
+		gardenConfigMap.Data = make(map[string]string)
 	}
-	configMap.Data["config.yaml"] = string(configYAML)
+	gardenConfigMap.Data["config.yaml"] = string(mergedConfigYAML)
 
 	return nil
 }

@@ -188,8 +188,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("Secret for Shoot processed", "name", shoot.Name, "result", result)
 	}
 
-	// Configure OIDC authentication if GreenhouseIssuerUrl is set
-	if r.CareInstruction.Spec.GreenhouseIssuerUrl != "" {
+	// Configure OIDC authentication if AuthenticationConfigMapRef is set
+	if r.CareInstruction.Spec.AuthenticationConfigMapRef != "" {
 		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",

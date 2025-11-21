@@ -16,8 +16,9 @@ shoot-grafter continuously monitors Garden clusters for Shoots matching specific
 2. **Extracts cluster credentials**: Retrieves API server URLs and CA certificates from Shoot resources
 3. **Creates Greenhouse Clusters**: Automatically registers discovered Shoots as Greenhouse Cluster resources
 4. **Propagates labels**: Transfers specified labels from Shoots to Greenhouse Clusters for consistent organization
-5. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
-6. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
+5. **Configures OIDC authentication**: Optionally configures OIDC authentication on Shoot clusters to enable Greenhouse authentication
+6. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
+7. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
 
 ## Architecture
 
@@ -48,6 +49,7 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Extracts cluster connection details (API server URL, CA certificate)
 - Creates or updates corresponding Secret resources with OIDC configuration
 - Generates Greenhouse Cluster resources with appropriate labels
+- Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc_connectivity/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
 
 ## Custom Resource: CareInstruction
@@ -91,8 +93,8 @@ spec:
     managed-by: shoot-grafter
     onboarding-source: garden-prod
   
-  # Disable automatic RBAC configuration (default: false)
-  disableRBAC: false
+  # Reference to AuthenticationConfiguration ConfigMap (optional)
+  authenticationConfigMapRef: greenhouse-oidc-config
 ```
 
 ### CareInstruction Spec Fields
@@ -105,7 +107,7 @@ spec:
 | `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected) |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
-| `disableRBAC` | bool | No | When true, skips automatic RBAC setup on Shoot clusters (default: false) |
+| `authenticationConfigMapRef` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration (config.yaml with apiserver.config.k8s.io/v1beta1 content) |
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
 
@@ -209,6 +211,53 @@ spec:
     - owned-by
   additionalLabels:
     onboarding-method: shoot-grafter
+```
+
+### Example 4: Configuring OIDC Authentication
+
+This example shows how to configure OIDC authentication on Shoots to enable Greenhouse authentication:
+
+```yaml
+apiVersion: shoot-grafter.cloudoperators/v1alpha1
+kind: CareInstruction
+metadata:
+  name: oidc-enabled-shoots
+  namespace: greenhouse-prod
+spec:
+  gardenClusterName: prod-garden
+  gardenNamespace: garden--production
+  shootSelector:
+    matchLabels:
+      oidc-enabled: "true"
+  authenticationConfigMapRef: greenhouse-oidc-config
+  propagateLabels:
+    - environment
+```
+
+The referenced ConfigMap should contain an AuthenticationConfiguration:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenhouse-oidc-config
+  namespace: greenhouse-prod
+data:
+  config.yaml: |
+    apiVersion: apiserver.config.k8s.io/v1beta1
+    kind: AuthenticationConfiguration
+    jwt:
+    - issuer:
+        url: https://oidc.greenhouse.example.com
+        audiences:
+        - greenhouse
+      claimMappings:
+        username:
+          claim: sub
+          prefix: "greenhouse:"
+        groups:
+          claim: groups
+          prefix: "greenhouse:"
 ```
 
 ## Debugging Shoot Reconciliation

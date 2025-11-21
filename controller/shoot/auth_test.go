@@ -10,57 +10,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apiserverv1beta1 "k8s.io/apiserver/pkg/apis/apiserver/v1beta1"
 	"sigs.k8s.io/yaml"
 )
 
 var _ = Describe("Auth", func() {
-	Describe("createGreenhouseIssuerConfig", func() {
-		DescribeTable("should create a valid JWT authenticator config",
-			func(issuerURL string) {
-				controller := &ShootController{
-					Logger: logr.Discard(),
-					CareInstruction: &v1alpha1.CareInstruction{
-						Spec: v1alpha1.CareInstructionSpec{
-							GreenhouseIssuerUrl: issuerURL,
-						},
-					},
-				}
-
-				config := controller.createGreenhouseIssuerConfig()
-
-				// Verify it returns proper type
-				var _ apiserverv1beta1.JWTAuthenticator = config
-
-				// Verify issuer configuration
-				Expect(config.Issuer.URL).To(Equal(issuerURL))
-				Expect(config.Issuer.Audiences).To(ConsistOf("greenhouse"))
-				Expect(config.Issuer.CertificateAuthority).To(Equal(""))
-				Expect(config.Issuer.DiscoveryURL).To(BeNil())
-
-				// Verify claim mappings
-				Expect(config.ClaimMappings.Username.Claim).To(Equal("sub"))
-				Expect(config.ClaimMappings.Username.Prefix).NotTo(BeNil())
-				Expect(*config.ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
-
-				// Verify optional fields are not set
-				Expect(config.ClaimMappings.Groups.Claim).To(BeEmpty())
-				Expect(config.ClaimMappings.Groups.Expression).To(BeEmpty())
-				Expect(config.ClaimMappings.UID.Claim).To(BeEmpty())
-				Expect(config.ClaimMappings.UID.Expression).To(BeEmpty())
-				Expect(config.ClaimMappings.Extra).To(BeEmpty())
-				Expect(config.ClaimValidationRules).To(BeEmpty())
-				Expect(config.UserValidationRules).To(BeEmpty())
-			},
-			Entry("with standard HTTPS URL", "https://greenhouse.example.com"),
-			Entry("with URL containing path", "https://auth.example.com/greenhouse"),
-			Entry("with localhost URL", "https://localhost:8080/oidc"),
-			Entry("with URL containing port and path", "https://greenhouse.example.com:8443/auth/realms/greenhouse"),
-		)
-	})
-
-	Describe("upsertGreenhouseIssuer", func() {
+	Describe("mergeAuthenticationConfigurations", func() {
 		var controller *ShootController
 
 		BeforeEach(func() {
@@ -68,29 +23,41 @@ var _ = Describe("Auth", func() {
 				Logger: logr.Discard(),
 				CareInstruction: &v1alpha1.CareInstruction{
 					Spec: v1alpha1.CareInstructionSpec{
-						GreenhouseIssuerUrl: "https://greenhouse.example.com",
+						AuthenticationConfigMapRef: "greenhouse-auth-config",
 					},
 				},
 			}
 		})
 
-		DescribeTable("should correctly upsert greenhouse issuer",
-			func(initialConfigMap *corev1.ConfigMap, expectedConfig apiserverv1beta1.AuthenticationConfiguration, expectOtherKeys map[string]string) {
-				err := controller.upsertGreenhouseIssuer(initialConfigMap)
+		DescribeTable("should correctly merge authentication configurations",
+			func(
+				initialGardenConfigMap *corev1.ConfigMap,
+				greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration,
+				expectedConfigMap *corev1.ConfigMap,
+			) {
+				// Call the merge function
+				err := controller.mergeAuthenticationConfigurations(initialGardenConfigMap, &greenhouseAuthConfig)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify ConfigMap data was updated
-				Expect(initialConfigMap.Data).NotTo(BeNil())
-				Expect(initialConfigMap.Data).To(HaveKey("config.yaml"))
+				Expect(initialGardenConfigMap.Data).NotTo(BeNil())
+				Expect(initialGardenConfigMap.Data).To(HaveKey("config.yaml"))
 
-				// Verify other keys are preserved
-				for key, value := range expectOtherKeys {
-					Expect(initialConfigMap.Data).To(HaveKeyWithValue(key, value))
+				// Verify other data keys are preserved (keys that are not "config.yaml")
+				for key, value := range expectedConfigMap.Data {
+					if key != "config.yaml" {
+						Expect(initialGardenConfigMap.Data).To(HaveKeyWithValue(key, value))
+					}
 				}
 
-				// Parse the resulting configuration
+				// Unmarshal the actual result
 				var actualConfig apiserverv1beta1.AuthenticationConfiguration
-				err = yaml.Unmarshal([]byte(initialConfigMap.Data["config.yaml"]), &actualConfig)
+				err = yaml.Unmarshal([]byte(initialGardenConfigMap.Data["config.yaml"]), &actualConfig)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Unmarshal the expected configuration
+				var expectedConfig apiserverv1beta1.AuthenticationConfiguration
+				err = yaml.Unmarshal([]byte(expectedConfigMap.Data["config.yaml"]), &expectedConfig)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Compare configurations
@@ -112,15 +79,11 @@ var _ = Describe("Auth", func() {
 					}
 				}
 			},
-			Entry("with empty ConfigMap",
+			Entry("with empty Garden ConfigMap and one Greenhouse issuer",
 				&corev1.ConfigMap{
 					Data: map[string]string{},
 				},
 				apiserverv1beta1.AuthenticationConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "apiserver.k8s.io/v1beta1",
-						Kind:       "AuthenticationConfiguration",
-					},
 					JWT: []apiserverv1beta1.JWTAuthenticator{
 						{
 							Issuer: apiserverv1beta1.Issuer{
@@ -136,19 +99,30 @@ var _ = Describe("Auth", func() {
 						},
 					},
 				},
-				nil),
-			Entry("with ConfigMap having no config.yaml key but other data",
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"other-key":   "some-value",
+						"config.yaml": `apiVersion: apiserver.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+					},
+				}),
+			Entry("with Garden ConfigMap having other data keys (should preserve them)",
+				&corev1.ConfigMap{
+					Data: map[string]string{
+						"other-key":   "other-value",
 						"another-key": "another-value",
 					},
 				},
 				apiserverv1beta1.AuthenticationConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "apiserver.k8s.io/v1beta1",
-						Kind:       "AuthenticationConfiguration",
-					},
 					JWT: []apiserverv1beta1.JWTAuthenticator{
 						{
 							Issuer: apiserverv1beta1.Issuer{
@@ -164,38 +138,25 @@ var _ = Describe("Auth", func() {
 						},
 					},
 				},
-				map[string]string{
-					"other-key":   "some-value",
-					"another-key": "another-value",
-				}),
-			Entry("with ConfigMap having empty config.yaml",
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": "",
+						"other-key":   "other-value",
+						"another-key": "another-value",
+						"config.yaml": `apiVersion: apiserver.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
 					},
-				},
-				apiserverv1beta1.AuthenticationConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "apiserver.k8s.io/v1beta1",
-						Kind:       "AuthenticationConfiguration",
-					},
-					JWT: []apiserverv1beta1.JWTAuthenticator{
-						{
-							Issuer: apiserverv1beta1.Issuer{
-								URL:       "https://greenhouse.example.com",
-								Audiences: []string{"greenhouse"},
-							},
-							ClaimMappings: apiserverv1beta1.ClaimMappings{
-								Username: apiserverv1beta1.PrefixedClaimOrExpression{
-									Claim:  "sub",
-									Prefix: stringPtr("greenhouse:"),
-								},
-							},
-						},
-					},
-				},
-				nil),
-			Entry("with ConfigMap having one different issuer",
+				}),
+			Entry("with Garden ConfigMap having one different issuer (should add Greenhouse issuer)",
 				&corev1.ConfigMap{
 					Data: map[string]string{
 						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
@@ -212,22 +173,7 @@ jwt:
 					},
 				},
 				apiserverv1beta1.AuthenticationConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "apiserver.config.k8s.io/v1beta1",
-						Kind:       "AuthenticationConfiguration",
-					},
 					JWT: []apiserverv1beta1.JWTAuthenticator{
-						{
-							Issuer: apiserverv1beta1.Issuer{
-								URL:       "https://other.example.com",
-								Audiences: []string{"other"},
-							},
-							ClaimMappings: apiserverv1beta1.ClaimMappings{
-								Username: apiserverv1beta1.PrefixedClaimOrExpression{
-									Claim: "sub",
-								},
-							},
-						},
 						{
 							Issuer: apiserverv1beta1.Issuer{
 								URL:       "https://greenhouse.example.com",
@@ -242,8 +188,30 @@ jwt:
 						},
 					},
 				},
-				nil),
-			Entry("with ConfigMap already having greenhouse issuer (should update it)",
+				&corev1.ConfigMap{
+					Data: map[string]string{
+						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://other.example.com
+    audiences:
+    - other
+  claimMappings:
+    username:
+      claim: sub
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+					},
+				}),
+			Entry("with Garden ConfigMap having the same issuer (Greenhouse should update it)",
 				&corev1.ConfigMap{
 					Data: map[string]string{
 						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
@@ -260,10 +228,6 @@ jwt:
 					},
 				},
 				apiserverv1beta1.AuthenticationConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "apiserver.config.k8s.io/v1beta1",
-						Kind:       "AuthenticationConfiguration",
-					},
 					JWT: []apiserverv1beta1.JWTAuthenticator{
 						{
 							Issuer: apiserverv1beta1.Issuer{
@@ -279,17 +243,32 @@ jwt:
 						},
 					},
 				},
-				nil),
-			Entry("with ConfigMap having multiple issuers including greenhouse (should update greenhouse)",
 				&corev1.ConfigMap{
 					Data: map[string]string{
 						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
-    url: https://issuer1.example.com
+    url: https://greenhouse.example.com
     audiences:
-    - issuer1
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+					},
+				}),
+			Entry("with multiple Greenhouse issuers and multiple Garden issuers",
+				&corev1.ConfigMap{
+					Data: map[string]string{
+						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://garden-issuer1.example.com
+    audiences:
+    - garden1
   claimMappings:
     username:
       claim: sub
@@ -301,9 +280,9 @@ jwt:
     username:
       claim: email
 - issuer:
-    url: https://issuer3.example.com
+    url: https://garden-issuer2.example.com
     audiences:
-    - issuer3
+    - garden2
   claimMappings:
     username:
       claim: sub
@@ -311,22 +290,7 @@ jwt:
 					},
 				},
 				apiserverv1beta1.AuthenticationConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						APIVersion: "apiserver.config.k8s.io/v1beta1",
-						Kind:       "AuthenticationConfiguration",
-					},
 					JWT: []apiserverv1beta1.JWTAuthenticator{
-						{
-							Issuer: apiserverv1beta1.Issuer{
-								URL:       "https://issuer1.example.com",
-								Audiences: []string{"issuer1"},
-							},
-							ClaimMappings: apiserverv1beta1.ClaimMappings{
-								Username: apiserverv1beta1.PrefixedClaimOrExpression{
-									Claim: "sub",
-								},
-							},
-						},
 						{
 							Issuer: apiserverv1beta1.Issuer{
 								URL:       "https://greenhouse.example.com",
@@ -341,30 +305,79 @@ jwt:
 						},
 						{
 							Issuer: apiserverv1beta1.Issuer{
-								URL:       "https://issuer3.example.com",
-								Audiences: []string{"issuer3"},
+								URL:       "https://another-greenhouse.example.com",
+								Audiences: []string{"another"},
 							},
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
-									Claim: "sub",
+									Claim:  "email",
+									Prefix: stringPtr("other:"),
 								},
 							},
 						},
 					},
 				},
-				nil),
+				&corev1.ConfigMap{
+					Data: map[string]string{
+						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://garden-issuer1.example.com
+    audiences:
+    - garden1
+  claimMappings:
+    username:
+      claim: sub
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+- issuer:
+    url: https://garden-issuer2.example.com
+    audiences:
+    - garden2
+  claimMappings:
+    username:
+      claim: sub
+- issuer:
+    url: https://another-greenhouse.example.com
+    audiences:
+    - another
+  claimMappings:
+    username:
+      claim: email
+      prefix: 'other:'
+`,
+					},
+				}),
 		)
 
-		It("should return error for invalid YAML", func() {
+		It("should return error for invalid YAML in Garden ConfigMap", func() {
 			configMap := &corev1.ConfigMap{
 				Data: map[string]string{
 					"config.yaml": "invalid: yaml: content: [",
 				},
 			}
 
-			err := controller.upsertGreenhouseIssuer(configMap)
+			greenhouseAuthConfig := apiserverv1beta1.AuthenticationConfiguration{
+				JWT: []apiserverv1beta1.JWTAuthenticator{
+					{
+						Issuer: apiserverv1beta1.Issuer{
+							URL:       "https://greenhouse.example.com",
+							Audiences: []string{"greenhouse"},
+						},
+					},
+				},
+			}
+
+			err := controller.mergeAuthenticationConfigurations(configMap, &greenhouseAuthConfig)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to parse existing AuthenticationConfiguration"))
+			Expect(err.Error()).To(ContainSubstring("failed to parse existing Garden AuthenticationConfiguration"))
 		})
 	})
 })

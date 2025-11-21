@@ -32,6 +32,9 @@ const (
 
 	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
 	CareInstructionLabel = "shoot-grafter.cloudoperators/careinstruction"
+
+	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
+	AuthConfigMapLabel = "shoot-grafter.cloudoperators/authconfigmap"
 )
 
 // CareInstructionSpec holds the configuration for how to onboard Gardener shoots to Greenhouse.
@@ -59,10 +62,12 @@ type CareInstructionSpec struct {
 	// AdditionalLabels are labels that will be added to every Greenhouse Cluster created by this CareInstruction.
 	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`
 
-	// GreenhouseIssuerUrl is the OIDC issuer URL for Greenhouse authentication.
-	// When set, the shoot controller will create/update an AuthenticationConfiguration ConfigMap
-	// in the Garden cluster and configure the Shoot to use it for OIDC authentication.
-	GreenhouseIssuerUrl string `json:"greenhouseIssuerUrl,omitempty"`
+	// AuthenticationConfigMapRef is a reference to a ConfigMap in the Greenhouse cluster
+	// containing an AuthenticationConfiguration (config.yaml key with apiserver.config.k8s.io/v1beta1 content).
+	// When set, the shoot controller will merge this configuration with any existing configuration
+	// on the Garden cluster and configure the Shoot to use the merged authentication configuration.
+	// This allows specifying multiple OIDC issuers or having more control over the authentication setup.
+	AuthenticationConfigMapRef string `json:"authenticationConfigMapRef,omitempty"`
 }
 
 // CareInstructionStatus holds the status of the CareInstruction.

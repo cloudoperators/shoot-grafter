@@ -138,9 +138,9 @@ var _ = Describe("CareInstruction Controller", func() {
 			return len(secrets.Items) == 0 // Only the garden cluster secret should remain
 		}).Should(BeTrue(), "should eventually not find Secret resources")
 
-		// Clean up any ConfigMaps created during the tests
+		// Clean up any ConfigMaps created during the tests (Garden cluster)
 		configMaps := &corev1.ConfigMapList{}
-		Expect(test.GardenK8sClient.List(test.Ctx, configMaps)).To(Succeed(), "should list ConfigMaps")
+		Expect(test.GardenK8sClient.List(test.Ctx, configMaps)).To(Succeed(), "should list ConfigMaps in Garden cluster")
 		for _, configMap := range configMaps.Items {
 			Expect(client.IgnoreNotFound(test.GardenK8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete ConfigMap resource")
 		}
@@ -150,8 +150,27 @@ var _ = Describe("CareInstruction Controller", func() {
 			if err != nil {
 				return false
 			}
-			return len(configMaps.Items) == 0 // Only the garden cluster ConfigMap should remain
-		}).Should(BeTrue(), "should eventually not find ConfigMap resources")
+			return len(configMaps.Items) == 0
+		}).Should(BeTrue(), "should eventually not find ConfigMap resources in Garden cluster")
+
+		// Clean up auth ConfigMaps in Greenhouse cluster using label selector
+		greenhouseAuthConfigMaps := &corev1.ConfigMapList{}
+		Expect(test.K8sClient.List(test.Ctx, greenhouseAuthConfigMaps, client.MatchingLabels{
+			v1alpha1.AuthConfigMapLabel: "true",
+		})).To(Succeed(), "should list auth ConfigMaps in Greenhouse cluster")
+		for _, configMap := range greenhouseAuthConfigMaps.Items {
+			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete auth ConfigMap resource")
+		}
+		Eventually(func(g Gomega) bool {
+			greenhouseAuthConfigMaps := &corev1.ConfigMapList{}
+			err := test.K8sClient.List(test.Ctx, greenhouseAuthConfigMaps, client.MatchingLabels{
+				v1alpha1.AuthConfigMapLabel: "true",
+			})
+			if err != nil {
+				return false
+			}
+			return len(greenhouseAuthConfigMaps.Items) == 0
+		}).Should(BeTrue(), "should eventually not find auth ConfigMap resources in Greenhouse cluster")
 
 		// Clean up any Events created during the tests
 		events := &corev1.EventList{}
@@ -571,6 +590,8 @@ var _ = Describe("CareInstruction Controller", func() {
 	})
 
 	When("testing OIDC configuration", func() {
+		var greenhouseAuthConfigMap *corev1.ConfigMap
+
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
@@ -583,9 +604,35 @@ var _ = Describe("CareInstruction Controller", func() {
 							"test": "oidc",
 						},
 					},
-					GreenhouseIssuerUrl: "https://greenhouse.test.example.com",
+					AuthenticationConfigMapRef: "greenhouse-auth-config",
 				},
 			}
+
+			// Create the Greenhouse AuthenticationConfiguration ConfigMap with the label
+			greenhouseAuthConfigMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "greenhouse-auth-config",
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.AuthConfigMapLabel: "true",
+					},
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.test.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthConfigMap)).To(Succeed(), "should create Greenhouse auth ConfigMap")
 		})
 
 		It("should create AuthenticationConfiguration ConfigMap for shoot", func() {
@@ -885,6 +932,102 @@ jwt:
 
 				return true
 			}).Should(BeTrue(), "should eventually add greenhouse issuer while preserving others")
+		})
+	})
+
+	When("testing OIDC configuration with label auto-addition", func() {
+		var greenhouseAuthConfigMapNoLabel *corev1.ConfigMap
+
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-label",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "label",
+						},
+					},
+					AuthenticationConfigMapRef: "greenhouse-auth-config-no-label",
+				},
+			}
+
+			// Create the Greenhouse AuthenticationConfiguration ConfigMap WITHOUT the label
+			greenhouseAuthConfigMapNoLabel = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "greenhouse-auth-config-no-label",
+					Namespace: "default",
+					// No labels initially
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse-no-label.test.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthConfigMapNoLabel)).To(Succeed(), "should create Greenhouse auth ConfigMap without label")
+		})
+
+		It("should add auth ConfigMap label when not initially present", func() {
+			// Create a shoot to trigger reconciliation
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-label",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "label",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-label.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create CA ConfigMap
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-label.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap")
+
+			// Eventually verify the label was added by the controller
+			Eventually(func(g Gomega) bool {
+				var updatedConfigMap corev1.ConfigMap
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "greenhouse-auth-config-no-label",
+					Namespace: "default",
+				}, &updatedConfigMap)
+				if err != nil {
+					return false
+				}
+				// Verify the label was added
+				g.Expect(updatedConfigMap.Labels).To(HaveKeyWithValue(v1alpha1.AuthConfigMapLabel, "true"))
+				return true
+			}).Should(BeTrue(), "controller should add auth ConfigMap label when not initially present")
 		})
 	})
 

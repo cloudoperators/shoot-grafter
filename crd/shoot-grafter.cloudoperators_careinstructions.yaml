@@ -55,6 +55,14 @@ spec:
                 description: AdditionalLabels are labels that will be added to every
                   Greenhouse Cluster created by this CareInstruction.
                 type: object
+              authenticationConfigMapRef:
+                description: |-
+                  AuthenticationConfigMapRef is a reference to a ConfigMap in the Greenhouse cluster
+                  containing an AuthenticationConfiguration (config.yaml key with apiserver.config.k8s.io/v1beta1 content).
+                  When set, the shoot controller will merge this configuration with any existing configuration
+                  on the Garden cluster and configure the Shoot to use the merged authentication configuration.
+                  This allows specifying multiple OIDC issuers or having more control over the authentication setup.
+                type: string
               gardenClusterKubeConfigSecretName:
                 description: |-
                   GardenClusterKubeConfigSecretName is a reference to the secret containing the kubeconfig for the Garden cluster.
@@ -80,12 +88,6 @@ spec:
               gardenNamespace:
                 description: GardenNamespace is the namespace in which Greenhouse
                   will look for shoots on the seed cluster.
-                type: string
-              greenhouseIssuerUrl:
-                description: |-
-                  GreenhouseIssuerUrl is the OIDC issuer URL for Greenhouse authentication.
-                  When set, the shoot controller will create/update an AuthenticationConfiguration ConfigMap
-                  in the Garden cluster and configure the Shoot to use it for OIDC authentication.
                 type: string
               propagateLabels:
                 description: PropagateLabels is a list of labels that will be propagated
