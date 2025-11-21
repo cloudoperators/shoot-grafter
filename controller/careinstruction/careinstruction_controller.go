@@ -318,6 +318,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.TotalShoots = 0
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
+	careInstruction.Status.ReadyClusterNames = []string{}
+	careInstruction.Status.NotReadyClusterNames = []string{}
 	// List all shoots targeted by the given CareInstruction
 	shoots, err := careInstruction.ListShoots(ctx, *r.gardens[careInstruction.Name].gardenClient)
 	if client.IgnoreNotFound(err) != nil {
@@ -348,16 +350,19 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 
 	// TODO: Check if we really error out here
 	// TODO dont error out on first not ready cluster, need to check all clusters
-	// Check if all Clusters are ready
+	// Check if all Clusters are ready and populate status fields
 	for _, cluster := range clusters.Items {
-		if !cluster.Status.IsReadyTrue() {
+		if cluster.Status.IsReadyTrue() {
+			careInstruction.Status.ReadyClusterNames = append(careInstruction.Status.ReadyClusterNames, cluster.Name)
+		} else {
+			careInstruction.Status.NotReadyClusterNames = append(careInstruction.Status.NotReadyClusterNames, cluster.Name)
 			careInstruction.Status.FailedClusters++
 		}
-		if careInstruction.Status.FailedClusters > 0 {
-			err := errors.New("cluster is not ready")
+	}
 
-			return err
-		}
+	if careInstruction.Status.FailedClusters > 0 {
+		err := errors.New("cluster is not ready")
+		return err
 	}
 
 	r.Info("All shoots and clusters are reconciled for CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)

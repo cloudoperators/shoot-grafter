@@ -160,6 +160,18 @@ spec:
                   by this CareInstruction were reconciled.
                 format: date-time
                 type: string
+              notReadyClusterNames:
+                description: NotReadyClusterNames is the list of cluster names that
+                  are not ready.
+                items:
+                  type: string
+                type: array
+              readyClusterNames:
+                description: ReadyClusterNames is the list of cluster names that are
+                  ready.
+                items:
+                  type: string
+                type: array
               statusConditions:
                 description: StatusConditions represent the latest available observations
                   of the CareInstruction's current state.
