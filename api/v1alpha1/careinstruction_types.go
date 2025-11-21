@@ -89,6 +89,12 @@ type CareInstructionStatus struct {
 
 	// FailedClusters is the number of clusters that failed to be created by this CareInstruction.
 	FailedClusters int `json:"failedClusters,omitempty"`
+
+	// ReadyClusterNames is the list of cluster names that are ready.
+	ReadyClusterNames []string `json:"readyClusterNames,omitempty"`
+
+	// NotReadyClusterNames is the list of cluster names that are not ready.
+	NotReadyClusterNames []string `json:"notReadyClusterNames,omitempty"`
 }
 
 // +kubebuilder:object:root=true
