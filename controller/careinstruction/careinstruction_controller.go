@@ -54,6 +54,7 @@ type garden struct {
 type careInstructionContextKey struct{}
 
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=shoot-grafter.cloudoperators,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;update
@@ -120,7 +121,7 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// reconcile Shoots and Clusters created by this CareInstruction
 	if err := r.reconcileShootsNClusters(ctx, &careInstruction); err != nil {
-		r.Error(err, "failed to reconcile shoots and clusters for CareInstruction")
+		r.Info("failed to reconcile shoots and clusters for CareInstruction, will retry", "error", err.Error())
 		careInstruction.Status.SetConditions(
 			greenhousemetav1alpha1.FalseCondition(
 				v1alpha1.ShootsReconciledCondition,
