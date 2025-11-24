@@ -101,7 +101,7 @@ var _ = Describe("Auth", func() {
 				},
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.k8s.io/v1beta1
+						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -142,7 +142,7 @@ jwt:
 					Data: map[string]string{
 						"other-key":   "other-value",
 						"another-key": "another-value",
-						"config.yaml": `apiVersion: apiserver.k8s.io/v1beta1
+						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:

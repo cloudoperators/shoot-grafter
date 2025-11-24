@@ -177,7 +177,7 @@ func (r *ShootController) mergeAuthenticationConfigurations(gardenConfigMap *cor
 		// Create new configuration structure
 		gardenAuthConfig = apiserverv1beta1.AuthenticationConfiguration{
 			TypeMeta: metav1.TypeMeta{
-				APIVersion: apiserverv1beta1.SchemeGroupVersion.String(),
+				APIVersion: "apiserver.config.k8s.io/v1beta1",
 				Kind:       "AuthenticationConfiguration",
 			},
 			JWT: []apiserverv1beta1.JWTAuthenticator{},
