@@ -119,7 +119,7 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// reconcile Shoots and Clusters created by this CareInstruction
 	if err := r.reconcileShootsNClusters(ctx, &careInstruction); err != nil {
-		r.Error(err, "failed to reconcile shoots and clusters for CareInstruction")
+		r.Info("failed to reconcile shoots and clusters for CareInstruction, will retry", "error", err.Error())
 		careInstruction.Status.SetConditions(
 			greenhousemetav1alpha1.FalseCondition(
 				v1alpha1.ShootsReconciledCondition,
