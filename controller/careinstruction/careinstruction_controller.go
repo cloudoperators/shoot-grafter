@@ -54,6 +54,7 @@ type garden struct {
 type careInstructionContextKey struct{}
 
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=shoot-grafter.cloudoperators,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
