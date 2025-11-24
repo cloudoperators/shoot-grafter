@@ -37,6 +37,7 @@ type ShootController struct {
 	EventRecorder   record.EventRecorder // EventRecorder to emit events on the Greenhouse cluster
 }
 
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // emitEvent safely emits an event if EventRecorder is available
 func (r *ShootController) emitEvent(object client.Object, eventType, reason, message string) {
 	if r.EventRecorder != nil {
