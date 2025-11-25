@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// getShootClusterClient retrieves a Kubernetes client for the given shoot cluster using the Gardener AdminKubeconfigRequest.
 func getShootClusterClient(ctx context.Context, gardenClient client.Client, shoot *gardenerv1beta1.Shoot) (client.Client, error) {
 	expiration := 10 * time.Minute
 	expirationSeconds := int64(expiration.Seconds())

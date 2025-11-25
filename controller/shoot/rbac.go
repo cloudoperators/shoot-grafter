@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,7 @@ const (
 
 // setRBAC ensures that the necessary RBAC permissions are set for the Greenhouse controller to operate on the shoot cluster.
 // This currently defaults to cluster-admin permissions
+// We only check on CRB existence by name, we do not verify the actual permissions granted.
 // TODO: expose possibility to spec finegrained permissions for the Greenhouse controller
 func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client, shootName string) {
 	greenhouseOrg := r.CareInstruction.GetNamespace()
@@ -39,10 +41,14 @@ func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client
 	if err := shootClient.Create(ctx, clusterRoleBinding); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			r.Error(err, "failed to create ClusterRoleBinding for Greenhouse ServiceAccount", "ClusterRoleBinding", clusterRoleBinding.Name)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "RBACCreationFailed",
+				fmt.Sprintf("Failed to create ClusterRoleBinding %s for shoot %s/%s: %v", clusterRoleBinding.Name, r.CareInstruction.Namespace, shootName, err))
 		} else {
 			r.Info("ClusterRoleBinding for Greenhouse ServiceAccount already exists", "ClusterRoleBinding", clusterRoleBinding.Name)
 		}
 	} else {
 		r.Info("Created ClusterRoleBinding for Greenhouse ServiceAccount", "ClusterRoleBinding", clusterRoleBinding.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "RBACCreated",
+			fmt.Sprintf("Created ClusterRoleBinding %s for shoot %s/%s", clusterRoleBinding.Name, r.CareInstruction.Namespace, shootName))
 	}
 }
