@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"shoot-grafter/api/v1alpha1"
 
@@ -14,6 +15,7 @@ import (
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -79,10 +81,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-
-	// Emit event for shoot reconciliation start
-	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciling",
-		fmt.Sprintf("Reconciling shoot %s/%s", shoot.Namespace, shoot.Name))
 	apiServerURL := ""
 	// ApiServerURL is the Advertised Address with .name="external".
 	if shoot.Status.AdvertisedAddresses != nil {
@@ -162,12 +160,30 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		secret.Data = map[string][]byte{
 			"ca.crt": CADataBase64Enc,
 		}
-		secret.Annotations = annotations
-		secret.Labels = labels
+		// Merge annotations - preserve existing ones and add/update ours
+		if secret.Annotations == nil {
+			secret.Annotations = make(map[string]string)
+		}
+		for k, v := range annotations {
+			secret.Annotations[k] = v
+		}
+		// Merge labels - preserve existing ones and add/update ours
+		if secret.Labels == nil {
+			secret.Labels = make(map[string]string)
+		}
+		for k, v := range labels {
+			secret.Labels[k] = v
+		}
 		return nil
 	})
 	if err != nil {
 		r.Info("unable to create or update Secret for Shoot", "name", shoot.Name)
+		// Check if the error is due to a conflict (concurrent update)
+		// In this case, just requeue without emitting an event
+		if apierrors.IsConflict(err) || strings.Contains(err.Error(), "the object has been modified") {
+			r.Info("Secret was modified concurrently, requeueing", "name", shoot.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
 			fmt.Sprintf("Failed to create or update secret for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 		return ctrl.Result{}, err
@@ -189,8 +205,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("Secret for Shoot processed", "name", shoot.Name, "result", result)
 	}
 
-	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootReconciled",
-		fmt.Sprintf("Successfully reconciled shoot %s/%s", shoot.Namespace, shoot.Name))
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
 	return ctrl.Result{}, nil
