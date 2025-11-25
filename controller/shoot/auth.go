@@ -6,14 +6,12 @@ package shoot
 import (
 	"context"
 	"fmt"
+
 	"shoot-grafter/api/v1alpha1"
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
-	apiserver "k8s.io/apiserver/pkg/apis/apiserver"
 	apiserverv1beta1 "k8s.io/apiserver/pkg/apis/apiserver/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,34 +19,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-const (
-	// greenhouseClaimPrefix is the prefix used for Greenhouse OIDC claims
-	greenhouseClaimPrefix = "greenhouse:"
-
-	// greenhouseAudience is the audience value for Greenhouse OIDC tokens
-	greenhouseAudience = "greenhouse"
-)
-
-var (
-	// scheme for decoding/encoding AuthenticationConfiguration
-	authScheme = runtime.NewScheme()
-	// codec factory for AuthenticationConfiguration
-	authCodecFactory serializer.CodecFactory
-)
-
-func init() {
-	// Register the apiserver types with the scheme
-	_ = apiserver.AddToScheme(authScheme)
-	_ = apiserverv1beta1.AddToScheme(authScheme)
-	authCodecFactory = serializer.NewCodecFactory(authScheme)
-}
-
 // configureOIDCAuthentication configures OIDC authentication for the Shoot by:
 // 1. Fetching the AuthenticationConfiguration ConfigMap from Greenhouse cluster
 // 2. Merging it with any existing configuration on the Garden cluster
 // 3. Updating the Shoot spec to reference the merged configuration
 func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) error {
-
 	// Fetch the AuthenticationConfiguration ConfigMap from Greenhouse cluster
 	var greenhouseAuthConfigMap corev1.ConfigMap
 	if err := r.GreenhouseClient.Get(ctx, client.ObjectKey{
@@ -84,7 +59,7 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 	}
 
 	// Determine the ConfigMap name for Garden cluster
-	configMapName := fmt.Sprintf("%s-greenhouse-auth", shoot.Name)
+	configMapName := shoot.Name + "-greenhouse-auth"
 	useExistingConfigMap := false
 
 	// Check if Shoot already has a ConfigMap configured
