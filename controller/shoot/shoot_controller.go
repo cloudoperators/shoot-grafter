@@ -6,6 +6,7 @@ package shoot
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 
 	"shoot-grafter/api/v1alpha1"
 
@@ -74,21 +75,26 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	labels := map[string]string{
 		v1alpha1.CareInstructionLabel: r.CareInstruction.Name,
 	}
-	labelPropagateString := v1alpha1.CareInstructionLabel + ","
+	var labelPropagateBuilder strings.Builder
+	labelPropagateBuilder.WriteString(v1alpha1.CareInstructionLabel)
+	labelPropagateBuilder.WriteString(",")
 	// get labels specified via TransportLabels on the CareInstruction from the shoot
 	for _, v := range r.CareInstruction.Spec.PropagateLabels {
 		if labelValue, ok := shoot.Labels[v]; ok {
 			labels[v] = labelValue
-			labelPropagateString += v + ","
+			labelPropagateBuilder.WriteString(v)
+			labelPropagateBuilder.WriteString(",")
 		}
 	}
 	// get additional labels specified via AdditionalLabels on the CareInstruction
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
 		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
 			labels[k] = v
-			labelPropagateString += k + ","
+			labelPropagateBuilder.WriteString(k)
+			labelPropagateBuilder.WriteString(",")
 		}
 	}
+	labelPropagateString := labelPropagateBuilder.String()
 
 	annotations := map[string]string{
 		"greenhouse.sap/propagate-labels":           labelPropagateString,
