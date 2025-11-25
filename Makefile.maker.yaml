@@ -4,7 +4,7 @@
 # Configuration file for <https://github.com/sapcc/go-makefile-maker>
 
 metadata:
-  url: github.com/cloudoperators/shoot-grafter
+  url: https://github.com/cloudoperators/shoot-grafter
 
 binaries:
   - name:        shoot-grafter

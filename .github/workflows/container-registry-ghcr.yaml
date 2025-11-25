@@ -19,11 +19,9 @@ jobs:
   build-and-push-image:
     name: Push container to ghcr.io
     runs-on: ubuntu-latest
-    env:
-      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
     steps:
       - name: Check out code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
