@@ -13,6 +13,7 @@ binaries:
 
 golang:
   setGoModVersion: true
+  enableVendoring: true
 
 golangciLint:
   createConfig: true
