@@ -44,7 +44,7 @@ type CareInstructionSpec struct {
 
 	// GardenClusterName is the name of the Greenhouse Cluster representing the Gardener seed cluster from which the shoots will be reconciled.
 	// This is mutually exclusive to referring to the GardenCluster by a kubeconfig secret via GardenClusterKubeConfigSecretName.
-	// Order is 1. GardenClusterKubeConfigSecretName 2. GardenClusterNames
+	// Order is 1. GardenClusterKubeConfigSecretName 2. GardenClusterName
 	GardenClusterName string `json:"gardenClusterName,omitempty"`
 
 	// GardenNamespace is the namespace in which Greenhouse will look for shoots on the seed cluster.
@@ -82,6 +82,12 @@ type CareInstructionStatus struct {
 
 	// FailedClusters is the number of clusters that failed to be created by this CareInstruction.
 	FailedClusters int `json:"failedClusters,omitempty"`
+
+	// ReadyClusterNames is the list of cluster names that are ready.
+	ReadyClusterNames []string `json:"readyClusterNames,omitempty"`
+
+	// NotReadyClusterNames is the list of cluster names that are not ready.
+	NotReadyClusterNames []string `json:"notReadyClusterNames,omitempty"`
 }
 
 // +kubebuilder:object:root=true

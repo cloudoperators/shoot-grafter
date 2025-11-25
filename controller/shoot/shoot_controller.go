@@ -6,6 +6,8 @@ package shoot
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"strings"
 
 	"shoot-grafter/api/v1alpha1"
 
@@ -13,7 +15,9 @@ import (
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +36,17 @@ type ShootController struct {
 	logr.Logger
 	Name            string
 	CareInstruction *v1alpha1.CareInstruction
+	EventRecorder   record.EventRecorder // EventRecorder to emit events on the Greenhouse cluster
+}
+
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// emitEvent safely emits an event if EventRecorder is available
+func (r *ShootController) emitEvent(object client.Object, eventType, reason, message string) {
+	if r.EventRecorder != nil {
+		r.EventRecorder.Event(object, eventType, reason, message)
+	} else {
+		r.Info("Event (EventRecorder not available)", "type", eventType, "reason", reason, "message", message)
+	}
 }
 
 func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
@@ -40,6 +55,12 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 	if err != nil {
 		return err
 	}
+
+	// Log missing event recorder
+	if r.EventRecorder == nil {
+		r.Error(nil, "EventRecorder is not set for ShootController", "name", r.Name)
+	}
+
 	// Setup the shoot controller with the manager
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(r.Name).
@@ -47,13 +68,17 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// TODO: defer some status collection --> persist on CareInstruction status, maybe use events?
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.Info("Reconciling Shoot", "name", req.Name, "namespace", req.Namespace)
 
 	var shoot gardenerv1beta1.Shoot
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, &shoot); err != nil {
-		r.Error(err, "unable to fetch Shoot")
+		r.Info("unable to fetch Shoot")
+		if client.IgnoreNotFound(err) == nil {
+			// Shoot was deleted
+			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootDeleted",
+				fmt.Sprintf("Shoot %s/%s was deleted", req.Namespace, req.Name))
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	apiServerURL := ""
@@ -66,7 +91,9 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 	if apiServerURL == "" {
-		r.Error(nil, "no external API server URL found for Shoot", "name", shoot.Name)
+		r.Info("no external API server URL found for Shoot", "name", shoot.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "APIServerURLMissing",
+			fmt.Sprintf("No external API server URL found for shoot %s/%s", shoot.Namespace, shoot.Name))
 		return ctrl.Result{}, nil
 	}
 
@@ -95,24 +122,21 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
 	}
 
-	// list all configmaps in the shoot namespace with the suffix .ca-cluster
-	var cmList corev1.ConfigMapList
-	if err := r.GardenClient.List(ctx, &cmList, client.InNamespace(shoot.Namespace)); err != nil {
-		r.Error(err, "unable to list ConfigMaps in Shoot namespace", "namespace", shoot.Namespace)
-		return ctrl.Result{}, err
-	}
-
 	// create or update Secret with the CA data from the shoot
 	// and the labels from the CareInstruction
 	var cm corev1.ConfigMap
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: shoot.Namespace, Name: shoot.Name + shootCACMSuffix}, &cm); err != nil {
-		r.Error(err, "unable to fetch CA ConfigMap for Shoot")
+		r.Info("unable to fetch CA ConfigMap for Shoot")
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CAConfigMapFetchFailed",
+			fmt.Sprintf("Failed to fetch CA ConfigMap for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 		return ctrl.Result{}, err
 	}
 
 	CAData := cm.Data["ca.crt"]
 	if CAData == "" {
-		r.Error(nil, "no CA data found in ConfigMap for Shoot", "name", cm.Name)
+		r.Info("no CA data found in ConfigMap for Shoot", "name", cm.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CADataMissing",
+			fmt.Sprintf("No CA data found in ConfigMap %s for shoot %s/%s", cm.Name, shoot.Namespace, shoot.Name))
 		return ctrl.Result{}, nil
 	}
 	CADataBytes := []byte(CAData)
@@ -136,19 +160,45 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		secret.Data = map[string][]byte{
 			"ca.crt": CADataBase64Enc,
 		}
-		secret.Annotations = annotations
-		secret.Labels = labels
+		// Merge annotations - preserve existing ones and add/update ours
+		if secret.Annotations == nil {
+			secret.Annotations = make(map[string]string)
+		}
+		for k, v := range annotations {
+			secret.Annotations[k] = v
+		}
+		// Merge labels - preserve existing ones and add/update ours
+		if secret.Labels == nil {
+			secret.Labels = make(map[string]string)
+		}
+		for k, v := range labels {
+			secret.Labels[k] = v
+		}
 		return nil
 	})
 	if err != nil {
-		r.Error(err, "unable to create or update Secret for Shoot", "name", shoot.Name)
+		r.Info("unable to create or update Secret for Shoot", "name", shoot.Name)
+		// Check if the error is due to a conflict (concurrent update)
+		// In this case, just requeue without emitting an event
+		if apierrors.IsConflict(err) || strings.Contains(err.Error(), "the object has been modified") {
+			r.Info("Secret was modified concurrently, requeueing", "name", shoot.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
+			fmt.Sprintf("Failed to create or update secret for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 		return ctrl.Result{}, err
 	}
 	switch result {
 	case controllerutil.OperationResultCreated:
 		r.Info("Secret for Shoot created", "name", shoot.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "SecretCreated",
+			fmt.Sprintf("Created Greenhouse secret %s for shoot %s/%s with API server URL %s",
+				secret.Name, shoot.Namespace, shoot.Name, apiServerURL))
 	case controllerutil.OperationResultUpdated:
 		r.Info("Secret for Shoot updated", "name", shoot.Name)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "SecretUpdated",
+			fmt.Sprintf("Updated Greenhouse secret %s for shoot %s/%s with API server URL %s",
+				secret.Name, shoot.Namespace, shoot.Name, apiServerURL))
 	case controllerutil.OperationResultNone:
 		r.Info("Secret for Shoot unchanged", "name", shoot.Name)
 	default:

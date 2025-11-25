@@ -56,6 +56,7 @@ type careInstructionContextKey struct{}
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Setup the controller with the manager
@@ -270,12 +271,14 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 
 	// Register the ShootController with the garden manager
+	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster
 	sc := &shoot.ShootController{
 		GreenhouseClient: r.Client,
 		GardenClient:     gardenClient,
 		Logger:           r.WithValues("careInstruction", careInstruction.Name),
 		Name:             shoot.GenerateName(careInstruction.Name),
 		CareInstruction:  careInstruction.DeepCopy(),
+		EventRecorder:    r.GetEventRecorderFor(shoot.GenerateName(careInstruction.Name)),
 	}
 	if err := sc.SetupWithManager(shootControllerMgr); err != nil {
 		return err
@@ -312,12 +315,15 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	return nil
 }
 
+// TODO: add names of ready and not ready clusters to status
 // reconcileShootsNClusters - reconciles the clusters created and owned by this CareInstruction.
 func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Reconciling shoots and clusters for CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
 	careInstruction.Status.TotalShoots = 0
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
+	careInstruction.Status.ReadyClusterNames = []string{}
+	careInstruction.Status.NotReadyClusterNames = []string{}
 	// List all shoots targeted by the given CareInstruction
 	shoots, err := careInstruction.ListShoots(ctx, *r.gardens[careInstruction.Name].gardenClient)
 	if client.IgnoreNotFound(err) != nil {
@@ -348,16 +354,19 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 
 	// TODO: Check if we really error out here
 	// TODO dont error out on first not ready cluster, need to check all clusters
-	// Check if all Clusters are ready
+	// Check if all Clusters are ready and populate status fields
 	for _, cluster := range clusters.Items {
-		if !cluster.Status.IsReadyTrue() {
+		if cluster.Status.IsReadyTrue() {
+			careInstruction.Status.ReadyClusterNames = append(careInstruction.Status.ReadyClusterNames, cluster.Name)
+		} else {
+			careInstruction.Status.NotReadyClusterNames = append(careInstruction.Status.NotReadyClusterNames, cluster.Name)
 			careInstruction.Status.FailedClusters++
 		}
-		if careInstruction.Status.FailedClusters > 0 {
-			err := errors.New("cluster is not ready")
+	}
 
-			return err
-		}
+	if careInstruction.Status.FailedClusters > 0 {
+		err := errors.New("cluster is not ready")
+		return err
 	}
 
 	r.Info("All shoots and clusters are reconciled for CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
