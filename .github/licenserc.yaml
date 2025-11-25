@@ -38,6 +38,7 @@ header:
     - 'charts/**/templates/**/*.yaml' # license headers on helm templates are causing issues
     - '.envrc'
     - 'shell.nix'
+    - '.license-scan-overrides.jsonl'
 
 
   comment: on-failure
