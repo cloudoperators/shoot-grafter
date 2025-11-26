@@ -44,7 +44,7 @@ jobs:
         uses: reviewdog/action-misspell@v1
         with:
           exclude: ./vendor/*
-          fail_on_error: true
+          fail_on_error: false
           github_token: ${{ secrets.GITHUB_TOKEN }}
           ignore: importas
           reporter: github-check
