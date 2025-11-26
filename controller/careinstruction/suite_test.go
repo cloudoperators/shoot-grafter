@@ -30,6 +30,10 @@ var _ = BeforeSuite(func() {
 
 	host := test.TestEnv.WebhookInstallOptions.LocalServingHost
 	port := test.TestEnv.WebhookInstallOptions.LocalServingPort
+
+	// Wait for the port to be free before starting the manager
+	// This avoids conflicts when tests run in parallel
+	test.WaitForPortFree(host, port)
 	// register controllers
 	mgr, err := ctrl.NewManager(test.Cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
@@ -56,9 +60,6 @@ var _ = BeforeSuite(func() {
 	// start the manager
 	go func() {
 		defer GinkgoRecover()
-		// Wait for the port to be free before starting the manager
-		// This avoids conflicts when tests run in parallel
-		test.WaitForPortFree(host, port)
 		Expect(mgr.Start(test.Ctx)).To(Succeed(), "there must be no error starting the manager")
 	}()
 	test.WaitForWebhookServerReady(host, port)

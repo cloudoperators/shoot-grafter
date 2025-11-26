@@ -40,6 +40,10 @@ var _ = Describe("Shoot Controller", func() {
 		host := test.TestEnv.WebhookInstallOptions.LocalServingHost
 		port := test.TestEnv.WebhookInstallOptions.LocalServingPort
 
+		// Wait for the port to be free before starting the manager
+		// This avoids conflicts when tests run in parallel
+		test.WaitForPortFree(host, port)
+
 		mgr, err := ctrl.NewManager(test.GardenCfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Metrics: server.Options{
@@ -72,9 +76,6 @@ var _ = Describe("Shoot Controller", func() {
 		// start the manager
 		go func() {
 			defer GinkgoRecover()
-			// Wait for the port to be free before starting the manager
-			// This avoids conflicts when tests run in parallel
-			test.WaitForPortFree(host, port)
 			Expect(mgr.Start(mgrCtx)).To(Succeed(), "there must be no error starting the manager")
 		}()
 		test.WaitForWebhookServerReady(host, port)
