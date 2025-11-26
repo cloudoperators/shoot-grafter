@@ -32,13 +32,14 @@ var (
 	mgrCtx          context.Context
 	mgrCancel       context.CancelFunc
 )
-var _ = Describe("CareInstruction Controller", func() {
+var _ = Describe("Shoot Controller", func() {
 	JustBeforeEach(func() {
 		// register controllers in JustBeforeEach, as they depend on the CareInstruction.
 		// Create CareInstruction in BeforeEach
 		skipNameValidation := true // Skip name validation for the controller
 		host := test.TestEnv.WebhookInstallOptions.LocalServingHost
 		port := test.TestEnv.WebhookInstallOptions.LocalServingPort
+
 		mgr, err := ctrl.NewManager(test.GardenCfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Metrics: server.Options{
@@ -63,6 +64,7 @@ var _ = Describe("CareInstruction Controller", func() {
 			CareInstruction:  careInstruction,
 		}).SetupWithManager(mgr)).To(Succeed(), "there must be no error setting up the controller with the manager")
 
+		// We test the careinstruction webhook by checking on the actually created Cluster resources
 		careInstructionWebhook := &webhookv1alpha1.CareInstructionWebhook{}
 		Expect(careInstructionWebhook.SetupWebhookWithManager(mgr)).To(Succeed(), "there must be no error setting up the webhook with the manager")
 
@@ -70,6 +72,9 @@ var _ = Describe("CareInstruction Controller", func() {
 		// start the manager
 		go func() {
 			defer GinkgoRecover()
+			// Wait for the port to be free before starting the manager
+			// This avoids conflicts when tests run in parallel
+			test.WaitForPortFree(host, port)
 			Expect(mgr.Start(mgrCtx)).To(Succeed(), "there must be no error starting the manager")
 		}()
 		test.WaitForWebhookServerReady(host, port)
