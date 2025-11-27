@@ -6,6 +6,8 @@
 
 **shoot-grafter** is a Kubernetes operator that automates the onboarding of [Gardener](https://gardener.cloud/) Shoots (Kubernetes clusters managed by Gardener) to [Greenhouse](https://github.com/cloudoperators/greenhouse), the cloud operations platform. It bridges the gap between Gardener-managed infrastructure and Greenhouse's centralized cluster management by dynamically discovering and registering Shoots as Greenhouse Clusters.
 
+The name "shoot-grafter" continues Gardener's and Greenhouse's botanical theme: just as a gardener grafts shoots onto rootstock to create robust plants, this operator grafts (connects) Gardener Shoots onto Greenhouse's centralized platform to create fully operational k8s clusters.
+
 This project is part of the [NeoNephos Foundation](https://neonephos.org/).
 
 ## What does shoot-grafter do?
