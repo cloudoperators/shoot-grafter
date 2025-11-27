@@ -210,6 +210,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 			return ctrl.Result{}, err
 		}
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
+			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
 	}
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
