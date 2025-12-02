@@ -453,7 +453,7 @@ func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, 
 	return nil
 }
 
-// enqueCareInstructionForGardenCluster - enqueues the CareInstruction for the given Garden Cluster.
+// enqueueCareInstructionForGardenCluster - enqueues the CareInstruction for the given Garden Cluster.
 func (r *CareInstructionReconciler) enqueueCareInstructionForGardenCluster(_ context.Context, obj client.Object) []ctrl.Request {
 	secret, ok := obj.(*corev1.Secret)
 	if !ok {
