@@ -746,6 +746,160 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
+	Context("When a shoot cluster is managed by a different CareInstruction", func() {
+		It("should detect and report the ownership conflict in status", func() {
+			By("Creating a shoot on the garden cluster")
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "conflict-shoot",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "ownership-conflict",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create shoot on garden cluster")
+
+			By("Creating first CareInstruction targeting the shoot")
+			careInstruction1 := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-owner",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "ownership-conflict",
+						},
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction1)).To(Succeed(), "should create first CareInstruction")
+
+			By("Creating a cluster owned by the first CareInstruction")
+			cluster := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot.Name,
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction1.Name,
+					},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{
+					AccessMode: greenhousev1alpha1.ClusterAccessModeDirect,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster)).To(Succeed(), "should create cluster owned by first CareInstruction")
+			cluster.Status.SetConditions(
+				greenhousemetav1alpha1.NewCondition(
+					greenhousemetav1alpha1.ReadyCondition,
+					metav1.ConditionTrue,
+					"ClusterReady",
+					"Cluster is ready",
+				),
+			)
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster)).To(Succeed(), "should set cluster to ready")
+
+			By("Creating second CareInstruction targeting the same shoot")
+			careInstruction2 := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-conflict",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "ownership-conflict",
+						},
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction2)).To(Succeed(), "should create second CareInstruction")
+
+			By("Verifying second CareInstruction detects the ownership conflict")
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction2)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed(), "should get second CareInstruction")
+
+				// Should show count mismatch (1 shoot, 0 clusters owned by this CareInstruction)
+				g.Expect(careInstruction2.Status.TotalShoots).To(Equal(1), "should have 1 total shoot")
+				g.Expect(careInstruction2.Status.CreatedClusters).To(Equal(0), "should have 0 created clusters")
+
+				// Should have detected the conflict and added it to status
+				g.Expect(careInstruction2.Status.Clusters).To(HaveLen(1), "should have 1 cluster in status")
+				if len(careInstruction2.Status.Clusters) > 0 {
+					conflictCluster := careInstruction2.Status.Clusters[0]
+					g.Expect(conflictCluster.Name).To(Equal(shoot.Name), "cluster name should match shoot name")
+					g.Expect(conflictCluster.Status).To(Equal(v1alpha1.ClusterStatusReady), "cluster status should be Ready (reflecting actual cluster state)")
+					g.Expect(conflictCluster.Message).To(ContainSubstring("Cluster managed by different CareInstruction"), "message should indicate ownership conflict")
+					g.Expect(conflictCluster.Message).To(ContainSubstring(careInstruction1.Name), "message should mention the actual owner")
+				}
+
+				// ShootsReconciled condition should be false due to mismatch
+				shootsReconciledCondition := careInstruction2.Status.GetConditionByType(v1alpha1.ShootsReconciledCondition)
+				g.Expect(shootsReconciledCondition).ToNot(BeNil(), "ShootsReconciled condition should exist")
+				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionFalse), "ShootsReconciled should be false")
+
+				return true
+			}).Should(BeTrue(), "should eventually detect ownership conflict")
+
+			By("Verifying first CareInstruction still shows correct status")
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction1)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed(), "should get first CareInstruction")
+
+				g.Expect(careInstruction1.Status.TotalShoots).To(Equal(1), "should have 1 total shoot")
+				g.Expect(careInstruction1.Status.CreatedClusters).To(Equal(1), "should have 1 created cluster")
+				g.Expect(careInstruction1.Status.FailedClusters).To(Equal(0), "should have 0 failed clusters")
+
+				// ShootsReconciled condition should be true for the owner
+				shootsReconciledCondition := careInstruction1.Status.GetConditionByType(v1alpha1.ShootsReconciledCondition)
+				g.Expect(shootsReconciledCondition).ToNot(BeNil(), "ShootsReconciled condition should exist")
+				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionTrue), "ShootsReconciled should be true for owner")
+
+				return true
+			}).Should(BeTrue(), "first CareInstruction should maintain correct status")
+
+			By("Verifying conflict is reported when cluster is not ready")
+			// Update cluster to not ready
+			cluster.Status.SetConditions(
+				greenhousemetav1alpha1.NewCondition(
+					greenhousemetav1alpha1.ReadyCondition,
+					metav1.ConditionFalse,
+					"ClusterNotReady",
+					"Cluster is not ready",
+				),
+			)
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster)).To(Succeed(), "should set cluster to not ready")
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction2)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed(), "should get second CareInstruction")
+
+				// Should still detect the conflict
+				g.Expect(careInstruction2.Status.Clusters).To(HaveLen(1), "should have 1 cluster in status")
+				if len(careInstruction2.Status.Clusters) > 0 {
+					conflictCluster := careInstruction2.Status.Clusters[0]
+					g.Expect(conflictCluster.Status).To(Equal(v1alpha1.ClusterStatusFailed), "cluster status should be Failed (reflecting actual cluster state)")
+					g.Expect(conflictCluster.Message).To(ContainSubstring("Cluster managed by different CareInstruction"), "message should indicate ownership conflict")
+				}
+
+				// Failed clusters should be incremented
+				g.Expect(careInstruction2.Status.FailedClusters).To(Equal(1), "should have 1 failed cluster")
+
+				return true
+			}).Should(BeTrue(), "should report conflict with correct status when cluster is not ready")
+		})
+	})
+
 	Context("When a CareInstruction is deleted", func() {
 		It("should stop the Shoot controller", func() {
 			shoot := &gardenerv1beta1.Shoot{

@@ -371,6 +371,56 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 
 	// Check if created TotalCreatedClusters match TotalShoots
 	if careInstruction.Status.TotalShoots != careInstruction.Status.CreatedClusters {
+		// Mismatch detected - check for ownership conflicts
+		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
+			"totalShoots", careInstruction.Status.TotalShoots,
+			"createdClusters", careInstruction.Status.CreatedClusters)
+
+		// Build a map of existing cluster names owned by this CareInstruction
+		existingClusterNames := make(map[string]bool)
+		for _, cluster := range clusters.Items {
+			existingClusterNames[cluster.Name] = true
+		}
+
+		// Check shoots that don't have a corresponding cluster in our list
+		for _, shoot := range shoots.Items {
+			if existingClusterNames[shoot.Name] {
+				// This shoot has a cluster owned by us, skip
+				continue
+			}
+
+			// Check if a cluster exists but is owned by a different CareInstruction
+			var existingCluster greenhousev1alpha1.Cluster
+			err := r.Get(ctx, client.ObjectKey{Name: shoot.Name, Namespace: careInstruction.Namespace}, &existingCluster)
+			if err == nil {
+				// Cluster exists - check ownership
+				if ownerLabel, hasLabel := existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != careInstruction.Name {
+					r.Info("Shoot cluster is managed by a different CareInstruction",
+						"shoot", shoot.Name,
+						"managedBy", ownerLabel,
+						"attemptedBy", careInstruction.Name)
+
+					// Determine cluster status based on actual cluster ready state
+					clusterStatus := v1alpha1.ClusterStatus{
+						Name:    shoot.Name,
+						Message: "Cluster managed by different CareInstruction: " + ownerLabel,
+					}
+
+					if existingCluster.Status.IsReadyTrue() {
+						clusterStatus.Status = v1alpha1.ClusterStatusReady
+					} else {
+						clusterStatus.Status = v1alpha1.ClusterStatusFailed
+						careInstruction.Status.FailedClusters++
+					}
+
+					careInstruction.Status.Clusters = append(careInstruction.Status.Clusters, clusterStatus)
+				}
+			} else if !apierrors.IsNotFound(err) {
+				// Some other error occurred
+				return err
+			}
+		}
+
 		err := errors.New("total shoots and created clusters do not match")
 		return err
 	}
