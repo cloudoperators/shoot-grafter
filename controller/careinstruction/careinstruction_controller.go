@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
@@ -40,6 +41,7 @@ type CareInstructionReconciler struct {
 	// Using factory function, expecting it to be set from the instantiating context.
 	GardenMgrContextFunc func() context.Context
 	gardens              map[string]*garden // Map of garden cluster names to their respective garden objects
+	gardensMu            sync.RWMutex       // Mutex to protect concurrent access to gardens map
 }
 
 type garden struct {
@@ -151,11 +153,15 @@ func (r *CareInstructionReconciler) removeFinalizer(ctx context.Context, o clien
 // reconcileManager - reconciles the shoot controller manager for the given CareInstruction.
 func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careInstruction v1alpha1.CareInstruction) error {
 	r.Info("Reconciling shoot controller manager for garden cluster", "name", careInstruction.Spec.GardenClusterName)
+
+	// Use namespace-qualified key to prevent collisions between CareInstructions with the same name in different namespaces
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+
+	// Initialize gardens map if needed (with write lock)
+	r.gardensMu.Lock()
 	if r.gardens == nil {
 		r.gardens = make(map[string]*garden)
 	}
-	// Use namespace-qualified key to prevent collisions between CareInstructions with the same name in different namespaces
-	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
 	if _, exists := r.gardens[gardenKey]; !exists {
 		r.gardens[gardenKey] = &garden{
 			mgr:                 nil,
@@ -165,6 +171,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			cancelFunc:          nil,
 		}
 	}
+	r.gardensMu.Unlock()
 
 	gardenClientConfig, scheme, err := r.GetGardenClusterAccess(ctx, &careInstruction)
 	// Get Access to the Garden Cluster
@@ -187,31 +194,32 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		),
 	)
 
-	// TODO: Need to recreate the manager if the careinstruction changes (at least the labels)
-
-	// Now we check the following to see if we need to recreate and restart the manager:
+	// Now we check the following to see if we need to recreate and restart the manager (with read lock):
+	r.gardensMu.RLock()
+	garden := r.gardens[gardenKey]
 	// 1. If we have no manager for the garden cluster, we need to create one
-	mgrExists := r.gardens[gardenKey].mgr != nil
+	mgrExists := garden.mgr != nil
 	// 2. If the manager could not be created, we need to recreate the client and manager
 	shootControllerStarted := careInstruction.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition).IsTrue()
 	// 3. If the created config is different to the existing one, we need to recreate the client and manager
-	gardenConfigChanged := !reflect.DeepEqual(r.gardens[gardenKey].gardenConfig, &gardenClientConfig)
+	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
-	careInstructionSpecChanged := !reflect.DeepEqual(*r.gardens[gardenKey].careInstructionSpec, careInstruction.Spec)
+	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
 	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
-	channelExists := r.gardens[gardenKey].stopChan != nil
+	channelExists := garden.stopChan != nil
 	channelOpen := true
 	if channelExists {
 		// use select with default for non-blocking check to see if the channel is closed
 		// https://gobyexample.com/non-blocking-channel-operations
 		select {
-		case _, ok := <-r.gardens[gardenKey].stopChan:
+		case _, ok := <-garden.stopChan:
 			channelOpen = ok
 		default:
 			channelOpen = true
 		}
 	}
-	// TODO: kill existing manager if careInstruction changes
+	r.gardensMu.RUnlock()
+
 	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen {
 		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
 		return nil
@@ -234,20 +242,24 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		reason = "unknown reason"
 	}
 	r.Info("Recreating client and manager for garden cluster because "+reason, "careInstruction", careInstruction.Name)
-	// Stop the existing manager if it exists
+
+	// Stop the existing manager if it exists (with read lock for cancelFunc access)
 	if mgrExists {
-		r.gardens[gardenKey].cancelFunc()
+		r.gardensMu.RLock()
+		cancelFunc := r.gardens[gardenKey].cancelFunc
+		r.gardensMu.RUnlock()
+
+		if cancelFunc != nil {
+			cancelFunc()
+		}
 		r.Info("Stopped existing garden manager for shootController", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
 	}
-
-	r.gardens[gardenKey].gardenConfig = &gardenClientConfig
 
 	// Create a new client for the garden cluster
 	gardenClient, err := client.New(&gardenClientConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		return err
 	}
-	r.gardens[gardenKey].gardenClient = &gardenClient
 	r.Info("Successfully created client for garden cluster", "name", careInstruction.Spec.GardenClusterName)
 
 	skipNameValidation := true
@@ -287,12 +299,21 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	// Create a new context for the garden manager from the main context with cancel function
 	gardenMgrContext, cancel := context.WithCancel(r.GardenMgrContextFunc())
+
+	// Update garden state (with write lock)
+	r.gardensMu.Lock()
+	r.gardens[gardenKey].gardenConfig = &gardenClientConfig
+	r.gardens[gardenKey].gardenClient = &gardenClient
 	r.gardens[gardenKey].mgr = shootControllerMgr
 	r.gardens[gardenKey].cancelFunc = cancel
 	r.gardens[gardenKey].stopChan = make(chan bool)
+	r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
+	stopChan := r.gardens[gardenKey].stopChan
+	r.gardensMu.Unlock()
+
 	// Start the garden manager in a goroutine
 	go func() {
-		defer close(r.gardens[gardenKey].stopChan)
+		defer close(stopChan)
 		log.FromContext(gardenMgrContext).Info("Starting garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
 		if err := shootControllerMgr.Start(gardenMgrContext); err != nil {
 			log.FromContext(gardenMgrContext).Error(err, "Failed to start garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
@@ -300,9 +321,6 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		}
 		log.FromContext(gardenMgrContext).Info("Shut down garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
 	}()
-
-	// store latest careInstruction.Spec if manager started successfully
-	r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
 
 	careInstruction.Status.SetConditions(
 		greenhousemetav1alpha1.TrueCondition(
@@ -323,9 +341,14 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.FailedClusters = 0
 	careInstruction.Status.Clusters = []v1alpha1.ClusterStatus{}
 
-	// List all shoots targeted by the given CareInstruction
+	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
-	shoots, err := careInstruction.ListShoots(ctx, *r.gardens[gardenKey].gardenClient)
+	r.gardensMu.RLock()
+	gardenClient := r.gardens[gardenKey].gardenClient
+	r.gardensMu.RUnlock()
+
+	// List all shoots targeted by the given CareInstruction
+	shoots, err := careInstruction.ListShoots(ctx, *gardenClient)
 	if client.IgnoreNotFound(err) != nil {
 		return err
 	}
@@ -400,15 +423,18 @@ func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, 
 			"CareInstruction is being deleted",
 		),
 	)
-	// Cancel the garden manager context for this garden cluster
+
+	// Cancel the garden manager context for this garden cluster (with write lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
-	if garden, exists := r.gardens[gardenKey]; exists {
-		if garden.cancelFunc != nil {
-			garden.cancelFunc()
-			delete(r.gardens, gardenKey)
-			r.Info("Cancelled garden manager context for shootController and deleted manager", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
-		}
+	r.gardensMu.Lock()
+	garden, exists := r.gardens[gardenKey]
+	if exists && garden.cancelFunc != nil {
+		garden.cancelFunc()
+		delete(r.gardens, gardenKey)
+		r.gardensMu.Unlock()
+		r.Info("Cancelled garden manager context for shootController and deleted manager", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
 	} else {
+		r.gardensMu.Unlock()
 		r.Info("Garden manager context not found for careInstruction: " + careInstruction.Name)
 	}
 	// Remove the finalizer
