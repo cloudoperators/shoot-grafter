@@ -11,9 +11,11 @@ import (
 	"shoot-grafter/api/v1alpha1"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
+	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -51,6 +53,24 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 // TODO: defer some status collection --> persist on CareInstruction status, maybe use events?
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.Info("Reconciling Shoot", "name", req.Name, "namespace", req.Namespace)
+
+	// Check if a cluster with this name already exists and is owned by a different CareInstruction
+	// Do this early to avoid unnecessary work
+	var existingCluster greenhousev1alpha1.Cluster
+	err := r.GreenhouseClient.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: r.CareInstruction.Namespace}, &existingCluster)
+	if err == nil {
+		// Cluster exists - check ownership
+		if ownerLabel, hasLabel := existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
+			// TODO: emit event on CareInstruction
+			r.Info("Skipping shoot - cluster already owned by different CareInstruction",
+				"shoot", req.Name,
+				"currentOwner", ownerLabel,
+				"attemptedOwner", r.CareInstruction.Name)
+			return ctrl.Result{}, nil
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
 
 	var shoot gardenerv1beta1.Shoot
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, &shoot); err != nil {
