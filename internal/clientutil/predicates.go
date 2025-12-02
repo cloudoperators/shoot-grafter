@@ -21,13 +21,6 @@ func PredicateFilterBySecretTypes(secretTypes ...corev1.SecretType) predicate.Pr
 	})
 }
 
-// PredicateHasLabelWithValue checks if an object has a specific label with a given value.
-func PredicateHasLabelWithValue(key, value string) predicate.Predicate {
-	return predicate.NewPredicateFuncs(func(o client.Object) bool {
-		return o.GetLabels()[key] == value
-	})
-}
-
 // PredicateHasLabel checks if an object has a specific label.
 func PredicateHasLabel(key string) predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
