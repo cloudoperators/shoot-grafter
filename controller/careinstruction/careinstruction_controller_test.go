@@ -184,27 +184,23 @@ var _ = Describe("CareInstruction Controller", func() {
 
 			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed(), "should create CareInstruction resource")
 
-			//  TODO: check why the shoot controller created by test-careinstrcution-2 is still running in this test
-			// Might want to change naming the shoot controllers with careinstruction name, not cluster name
-			// But still need to understand why the shoot controller is still running
 			Eventually(func(g Gomega) bool {
 				defer func() {
 					test.ReconcileObject(careInstruction)
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed(), "should get CareInstruction resource")
 				g.Expect(careInstruction.Status.Conditions).ToNot(BeEmpty(), "should have conditions in CareInstruction status")
-				// Expect the ShootsReconciled condition to be true
-				// TODO: this also returns true, if conditions are not set. Need to fix.
-				for _, condition := range careInstruction.Status.Conditions {
-					if condition.Type == v1alpha1.ShootsReconciledCondition {
-						g.Expect(condition.Status).To(Equal(metav1.ConditionFalse), "should have ShootsReconciled condition set to false")
-					}
-				}
+
+				// Find and check the ShootsReconciled condition
+				shootsReconciledCondition := careInstruction.Status.GetConditionByType(v1alpha1.ShootsReconciledCondition)
+				g.Expect(shootsReconciledCondition).ToNot(BeNil(), "ShootsReconciled condition should exist")
+				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionFalse), "should have ShootsReconciled condition set to false")
+
 				g.Expect(careInstruction.Status.TotalShoots).To(Equal(1), "should have total shoot count set to 1")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(0), "should have created clusters count set to 0")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0")
 				return true
-			}).Should(BeTrue(), "should eventually have ShootsReconciled condition set to true")
+			}).Should(BeTrue(), "should eventually have ShootsReconciled condition set to false")
 
 			By("creating a Cluster object for the Shoot")
 			cluster := &greenhousev1alpha1.Cluster{
