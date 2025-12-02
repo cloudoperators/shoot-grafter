@@ -154,8 +154,10 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	if r.gardens == nil {
 		r.gardens = make(map[string]*garden)
 	}
-	if _, exists := r.gardens[careInstruction.Name]; !exists {
-		r.gardens[careInstruction.Name] = &garden{
+	// Use namespace-qualified key to prevent collisions between CareInstructions with the same name in different namespaces
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	if _, exists := r.gardens[gardenKey]; !exists {
+		r.gardens[gardenKey] = &garden{
 			mgr:                 nil,
 			gardenConfig:        nil,
 			gardenClient:        nil,
@@ -189,21 +191,21 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	// Now we check the following to see if we need to recreate and restart the manager:
 	// 1. If we have no manager for the garden cluster, we need to create one
-	mgrExists := r.gardens[careInstruction.Name].mgr != nil
+	mgrExists := r.gardens[gardenKey].mgr != nil
 	// 2. If the manager could not be created, we need to recreate the client and manager
 	shootControllerStarted := careInstruction.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition).IsTrue()
 	// 3. If the created config is different to the existing one, we need to recreate the client and manager
-	gardenConfigChanged := !reflect.DeepEqual(r.gardens[careInstruction.Name].gardenConfig, &gardenClientConfig)
+	gardenConfigChanged := !reflect.DeepEqual(r.gardens[gardenKey].gardenConfig, &gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
-	careInstructionSpecChanged := !reflect.DeepEqual(*r.gardens[careInstruction.Name].careInstructionSpec, careInstruction.Spec)
+	careInstructionSpecChanged := !reflect.DeepEqual(*r.gardens[gardenKey].careInstructionSpec, careInstruction.Spec)
 	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
-	channelExists := r.gardens[careInstruction.Name].stopChan != nil
+	channelExists := r.gardens[gardenKey].stopChan != nil
 	channelOpen := true
 	if channelExists {
 		// use select with default for non-blocking check to see if the channel is closed
 		// https://gobyexample.com/non-blocking-channel-operations
 		select {
-		case _, ok := <-r.gardens[careInstruction.Name].stopChan:
+		case _, ok := <-r.gardens[gardenKey].stopChan:
 			channelOpen = ok
 		default:
 			channelOpen = true
@@ -234,18 +236,18 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	r.Info("Recreating client and manager for garden cluster because "+reason, "careInstruction", careInstruction.Name)
 	// Stop the existing manager if it exists
 	if mgrExists {
-		r.gardens[careInstruction.Name].cancelFunc()
+		r.gardens[gardenKey].cancelFunc()
 		r.Info("Stopped existing garden manager for shootController", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
 	}
 
-	r.gardens[careInstruction.Name].gardenConfig = &gardenClientConfig
+	r.gardens[gardenKey].gardenConfig = &gardenClientConfig
 
 	// Create a new client for the garden cluster
 	gardenClient, err := client.New(&gardenClientConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		return err
 	}
-	r.gardens[careInstruction.Name].gardenClient = &gardenClient
+	r.gardens[gardenKey].gardenClient = &gardenClient
 	r.Info("Successfully created client for garden cluster", "name", careInstruction.Spec.GardenClusterName)
 
 	skipNameValidation := true
@@ -285,12 +287,12 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	// Create a new context for the garden manager from the main context with cancel function
 	gardenMgrContext, cancel := context.WithCancel(r.GardenMgrContextFunc())
-	r.gardens[careInstruction.Name].mgr = shootControllerMgr
-	r.gardens[careInstruction.Name].cancelFunc = cancel
-	r.gardens[careInstruction.Name].stopChan = make(chan bool)
+	r.gardens[gardenKey].mgr = shootControllerMgr
+	r.gardens[gardenKey].cancelFunc = cancel
+	r.gardens[gardenKey].stopChan = make(chan bool)
 	// Start the garden manager in a goroutine
 	go func() {
-		defer close(r.gardens[careInstruction.Name].stopChan)
+		defer close(r.gardens[gardenKey].stopChan)
 		log.FromContext(gardenMgrContext).Info("Starting garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
 		if err := shootControllerMgr.Start(gardenMgrContext); err != nil {
 			log.FromContext(gardenMgrContext).Error(err, "Failed to start garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
@@ -300,7 +302,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}()
 
 	// store latest careInstruction.Spec if manager started successfully
-	r.gardens[careInstruction.Name].careInstructionSpec = &careInstruction.Spec
+	r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
 
 	careInstruction.Status.SetConditions(
 		greenhousemetav1alpha1.TrueCondition(
@@ -322,7 +324,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.ReadyClusterNames = []string{}
 	careInstruction.Status.NotReadyClusterNames = []string{}
 	// List all shoots targeted by the given CareInstruction
-	shoots, err := careInstruction.ListShoots(ctx, *r.gardens[careInstruction.Name].gardenClient)
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	shoots, err := careInstruction.ListShoots(ctx, *r.gardens[gardenKey].gardenClient)
 	if client.IgnoreNotFound(err) != nil {
 		return err
 	}
@@ -389,10 +392,11 @@ func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, 
 		),
 	)
 	// Cancel the garden manager context for this garden cluster
-	if garden, exists := r.gardens[careInstruction.Name]; exists {
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	if garden, exists := r.gardens[gardenKey]; exists {
 		if garden.cancelFunc != nil {
 			garden.cancelFunc()
-			delete(r.gardens, careInstruction.Name)
+			delete(r.gardens, gardenKey)
 			r.Info("Cancelled garden manager context for shootController and deleted manager", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
 		}
 	} else {
