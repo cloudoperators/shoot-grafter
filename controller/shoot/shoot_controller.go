@@ -101,13 +101,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
 	}
 
-	// list all configmaps in the shoot namespace with the suffix .ca-cluster
-	var cmList corev1.ConfigMapList
-	if err := r.GardenClient.List(ctx, &cmList, client.InNamespace(shoot.Namespace)); err != nil {
-		r.Error(err, "unable to list ConfigMaps in Shoot namespace", "namespace", shoot.Namespace)
-		return ctrl.Result{}, err
-	}
-
 	// create or update Secret with the CA data from the shoot
 	// and the labels from the CareInstruction
 	var cm corev1.ConfigMap
@@ -116,14 +109,14 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
-	CAData := cm.Data["ca.crt"]
-	if CAData == "" {
+	caData := cm.Data["ca.crt"]
+	if caData == "" {
 		r.Error(nil, "no CA data found in ConfigMap for Shoot", "name", cm.Name)
 		return ctrl.Result{}, nil
 	}
-	CADataBytes := []byte(CAData)
-	CADataBase64Enc := make([]byte, base64.StdEncoding.EncodedLen(len(CADataBytes)))
-	base64.StdEncoding.Encode(CADataBase64Enc, CADataBytes)
+	caDataBytes := []byte(caData)
+	caDataBase64Enc := make([]byte, base64.StdEncoding.EncodedLen(len(caDataBytes)))
+	base64.StdEncoding.Encode(caDataBase64Enc, caDataBytes)
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -133,14 +126,14 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Labels:      labels,
 		},
 		Data: map[string][]byte{
-			"ca.crt": CADataBase64Enc,
+			"ca.crt": caDataBase64Enc,
 		},
 		Type: greenhouseapis.SecretTypeOIDCConfig,
 	}
 
 	result, err := ctrl.CreateOrUpdate(ctx, r.GreenhouseClient, secret, func() error {
 		secret.Data = map[string][]byte{
-			"ca.crt": CADataBase64Enc,
+			"ca.crt": caDataBase64Enc,
 		}
 		secret.Annotations = annotations
 		secret.Labels = labels
