@@ -321,8 +321,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.TotalShoots = 0
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
-	careInstruction.Status.ReadyClusterNames = []string{}
-	careInstruction.Status.NotReadyClusterNames = []string{}
+	careInstruction.Status.Clusters = []v1alpha1.ClusterStatus{}
+
 	// List all shoots targeted by the given CareInstruction
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
 	shoots, err := careInstruction.ListShoots(ctx, *r.gardens[gardenKey].gardenClient)
@@ -334,8 +334,9 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	} else {
 		careInstruction.Status.TotalShoots = len(shoots.Items)
 	}
+
 	// List all clusters created by this CareInstruction
-	clusters, err := careInstruction.ListClusters(ctx, r.Client, careInstruction.Namespace)
+	clusters, err := careInstruction.ListClusters(ctx, r.Client)
 	if client.IgnoreNotFound(err) != nil {
 		return err
 	}
@@ -345,23 +346,31 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		careInstruction.Status.CreatedClusters = len(clusters.Items)
 	}
 
-	// TODO: Check if we really error out here
 	// Check if created TotalCreatedClusters match TotalShoots
 	if careInstruction.Status.TotalShoots != careInstruction.Status.CreatedClusters {
 		err := errors.New("total shoots and created clusters do not match")
 		return err
 	}
 
-	// TODO: Check if we really error out here
-	// TODO dont error out on first not ready cluster, need to check all clusters
-	// Check if all Clusters are ready and populate status fields
+	// Populate detailed cluster status list
 	for _, cluster := range clusters.Items {
+		clusterStatus := v1alpha1.ClusterStatus{
+			Name: cluster.Name,
+		}
+
 		if cluster.Status.IsReadyTrue() {
-			careInstruction.Status.ReadyClusterNames = append(careInstruction.Status.ReadyClusterNames, cluster.Name)
+			clusterStatus.Status = v1alpha1.ClusterStatusReady
 		} else {
-			careInstruction.Status.NotReadyClusterNames = append(careInstruction.Status.NotReadyClusterNames, cluster.Name)
+			clusterStatus.Status = v1alpha1.ClusterStatusFailed
+			// Get the message from the Ready condition
+			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
+			if readyCondition != nil && readyCondition.Message != "" {
+				clusterStatus.Message = readyCondition.Message
+			}
 			careInstruction.Status.FailedClusters++
 		}
+
+		careInstruction.Status.Clusters = append(careInstruction.Status.Clusters, clusterStatus)
 	}
 
 	if careInstruction.Status.FailedClusters > 0 {
