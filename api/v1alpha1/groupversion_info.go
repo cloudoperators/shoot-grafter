@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company
-// SPDX-License-Identifier: Apache-2.0
-
 // Package v1alpha1 contains API Schema definitions for the batch v1 API group
 // +kubebuilder:object:generate=true
 // +groupName=shoot-grafter.cloudoperators
