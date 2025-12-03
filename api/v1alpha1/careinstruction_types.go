@@ -28,10 +28,10 @@ const (
 	ShootsReconciledCondition greenhousemetav1alpha1.ConditionType = "ShootsReconciled"
 
 	// CommonCleanupFinalizer is the finalizer used to clean up resources when a CareInstruction is deleted.
-	CommonCleanupFinalizer = "shoot-grafter.cloudoperators/finalizer"
+	CommonCleanupFinalizer = "shoot-grafter.cloudoperators.dev/finalizer"
 
 	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
-	CareInstructionLabel = "shoot-grafter.cloudoperators/careinstruction"
+	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
 	// ClusterStatusReady indicates the cluster is ready.
 	ClusterStatusReady = "Ready"

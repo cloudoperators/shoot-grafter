@@ -59,7 +59,7 @@ A `CareInstruction` defines the configuration for onboarding Shoots from a speci
 ### Example CareInstruction
 
 ```yaml
-apiVersion: shoot-grafter.cloudoperators/v1alpha1
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: production-shoots

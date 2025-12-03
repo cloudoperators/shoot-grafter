@@ -14,7 +14,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// +kubebuilder:webhook:path=/mutate-shoot-grafter-cloudoperators-v1alpha1-careinstruction,mutating=true,failurePolicy=fail,groups=shoot-grafter.cloudoperators,resources=careinstructions,verbs=create;update,versions=v1alpha1,name=mcareinstruction.kb.io,sideEffects=None,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-shoot-grafter-cloudoperators-dev-v1alpha1-careinstruction,mutating=true,failurePolicy=fail,groups=shoot-grafter.cloudoperators.dev,resources=careinstructions,verbs=create;update,versions=v1alpha1,name=mcareinstruction.kb.io,sideEffects=None,admissionReviewVersions=v1
 
 type CareInstructionWebhook struct{}
 
