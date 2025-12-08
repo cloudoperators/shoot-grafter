@@ -1,0 +1,294 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-License-Identifier: Apache-2.0
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: shoots.core.gardener.cloud
+spec:
+  group: core.gardener.cloud
+  names:
+    kind: Shoot
+    listKind: ShootList
+    plural: shoots
+    singular: shoot
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: Shoot is a top-level resource representing a Kubernetes cluster managed by Gardener.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: Specification of the Shoot cluster.
+              properties:
+                cloudProfileName:
+                  type: string
+                secretBindingName:
+                  type: string
+                region:
+                  type: string
+                kubernetes:
+                  type: object
+                  description: Kubernetes version and configuration settings of the control plane components.
+                  properties:
+                    version:
+                      type: string
+                    kubeAPIServer:
+                      type: object
+                      properties:
+                        enableBasicAuthentication:
+                          type: boolean
+                    kubeControllerManager:
+                      type: object
+                    kubeScheduler:
+                      type: object
+                    kubeProxy:
+                      type: object
+                    kubelet:
+                      type: object
+                    verticalPodAutoscaler:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                networking:
+                  type: object
+                  description: Cluster networking configuration.
+                  properties:
+                    type:
+                      type: string
+                    pods:
+                      type: string
+                    nodes:
+                      type: string
+                    services:
+                      type: string
+                provider:
+                  type: object
+                  description: Provider-specific and provider-relevant information.
+                  properties:
+                    type:
+                      type: string
+                    infrastructureConfig:
+                      type: object
+                    controlPlaneConfig:
+                      type: object
+                    workers:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          machine:
+                            type: object
+                            properties:
+                              type:
+                                type: string
+                              image:
+                                type: object
+                                properties:
+                                  name:
+                                    type: string
+                                  version:
+                                    type: string
+                          minimum:
+                            type: integer
+                          maximum:
+                            type: integer
+                          maxSurge:
+                            type: string
+                          maxUnavailable:
+                            type: string
+                maintenance:
+                  type: object
+                  description: Maintenance time window and operations.
+                  properties:
+                    timeWindow:
+                      type: object
+                      properties:
+                        begin:
+                          type: string
+                        end:
+                          type: string
+                    autoUpdate:
+                      type: object
+                      properties:
+                        kubernetesVersion:
+                          type: boolean
+                        machineImageVersion:
+                          type: boolean
+                addons:
+                  type: object
+                  description: Addons configuration for the Shoot cluster.
+                  properties:
+                    kubernetesDashboard:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        authenticationMode:
+                          type: string
+                    nginxIngress:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        config:
+                          type: object
+                        externalTrafficPolicy:
+                          type: string
+            status:
+              type: object
+              description: Status of the Shoot cluster.
+              properties:
+                conditions:
+                  type: array
+                  description: Latest available observations of a Shoot's current state.
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                constraints:
+                  type: array
+                  description: Conditions of a Shoot's current state that constrain some operations.
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                gardener:
+                  type: object
+                  description: Information about the Gardener which last acted on the Shoot.
+                  properties:
+                    name:
+                      type: string
+                    version:
+                      type: string
+                hibernated:
+                  type: boolean
+                  description: Indicates whether the Shoot is currently hibernated.
+                lastOperation:
+                  type: object
+                  description: Information about the last operation on the Shoot.
+                  properties:
+                    type:
+                      type: string
+                    state:
+                      type: string
+                    progress:
+                      type: integer
+                    description:
+                      type: string
+                lastErrors:
+                  type: array
+                  description: Information about the last occurred error(s) during an operation.
+                  items:
+                    type: object
+                    properties:
+                      description:
+                        type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: Most recent generation observed for this Shoot.
+                retryCycleStartTime:
+                  type: string
+                  format: date-time
+                  description: Start time of the last retry cycle.
+                seedName:
+                  type: string
+                  description: Name of the seed cluster that runs the control plane of the Shoot.
+                technicalID:
+                  type: string
+                  description: Unique technical ID for this Shoot.
+                uid:
+                  type: string
+                  description: Unique identifier for the Shoot cluster.
+                clusterIdentity:
+                  type: string
+                  description: Identity of the Shoot cluster.
+                advertisedAddresses:
+                  type: array
+                  description: List of addresses relevant to the shoot.
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      url:
+                        type: string
+                migrationStartTime:
+                  type: string
+                  format: date-time
+                  description: Time when a migration to a different seed was initiated.
+                credentials:
+                  type: object
+                  description: Information about the shoot credentials.
+                lastHibernationTriggerTime:
+                  type: string
+                  format: date-time
+                  description: Last time when the hibernation controller managed to change the hibernation settings.
+                lastMaintenance:
+                  type: object
+                  description: Information about the last maintenance operations on the Shoot.
+                encryptedResources:
+                  type: array
+                  description: List of resources in the Shoot which are currently encrypted.
+                  items:
+                    type: string
+                networking:
+                  type: object
+                  description: Information about cluster networking such as CIDRs.
+                inPlaceUpdates:
+                  type: object
+                  description: Information about in-place updates for the Shoot workers.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: CloudProfile
+          type: string
+          jsonPath: .spec.cloudProfileName
+        - name: Region
+          type: string
+          jsonPath: .spec.region
+        - name: Version
+          type: string
+          jsonPath: .spec.kubernetes.version
+        - name: Status
+          type: string
+          jsonPath: .status.lastOperation.state
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

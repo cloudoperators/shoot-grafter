@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Configuration file for <https://github.com/sapcc/go-makefile-maker>
+
+metadata:
+  url: https://github.com/cloudoperators/shoot-grafter
+
+binaries:
+  - name:        shoot-grafter
+    fromPackage: .
+    installTo:   bin/
+
+golang:
+  setGoModVersion: true
+  enableVendoring: true
+
+golangciLint:
+  createConfig: true
+
+controllerGen:
+  enabled: true
+  rbacRoleName: manager-role
+
+githubWorkflow:
+  ci:
+    enabled: true
+    runOn: 
+      - "ubuntu-latest"
+  global:
+    defaultBranch: main
+  pushContainerToGhcr:
+    enabled: true
+    platforms: "linux/amd64,linux/arm64"
+    tagStrategy:
+      - latest
+      - sha
+
+renovate:
+  enabled: true
+  assignees:
+    - "@cloudoperators/greenhouse-backend"
+
+reuse:
+  enabled: false
