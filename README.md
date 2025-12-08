@@ -122,6 +122,10 @@ The CareInstruction status provides real-time information about the onboarding p
 status:
   statusConditions:
     conditions:
+      - type: Ready
+        status: "True"
+        reason: Ready
+        message: CareInstruction is ready
       - type: GardenClusterAccessReady
         status: "True"
         reason: GardenClusterAccessReady
@@ -132,11 +136,17 @@ status:
         status: "True"
         reason: Reconciled
         message: All shoots and clusters are reconciled
-  lastUpdateTime: "2025-11-18T09:00:00Z"
-  totalShoots: 15
-  failedShoots: 0
+  clusters:
+    - name: shoot-cluster-1
+      status: Ready
+    - name: shoot-cluster-2
+      status: Ready
+    - name: shoot-cluster-3
+      status: Failed
+      message: Cluster managed by different CareInstruction: other-careinstruction
+  totalShootCount: 15
   createdClusters: 15
-  failedClusters: 0
+  failedClusters: 1
 ```
 
 **Status Fields**:
@@ -145,9 +155,9 @@ status:
 - `GardenClusterAccessReady`: Indicates whether the Garden cluster is accessible
 - `ShootControllerStarted`: Shows if the dynamic Shoot controller has been started
 - `ShootsReconciled`: Reports whether all targeted Shoots have been successfully onboarded
-- `totalShoots`: Total number of Shoots matched by the selector
+- `clusters`: Detailed list of all clusters managed by this CareInstruction with their individual status (Ready/Failed) and optional message
+- `totalShootCount`: Total number of Shoots matched by the selector
 - `createdClusters`: Number of Greenhouse Clusters created by this CareInstruction
-- `failedShoots`: Number of Shoots that failed to be onboarded
 - `failedClusters`: Number of Greenhouse Clusters that are not ready
 
 ## Usage Examples
