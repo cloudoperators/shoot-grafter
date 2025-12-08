@@ -21,6 +21,8 @@ shoot-grafter continuously monitors Garden clusters for Shoots matching specific
 5. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
 6. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
 
+shoot-grafter currently only creates clusters matching Shoots but does not automatically clean up clusters when Shoot labels change or Shoots are deleted. Manual cleanup of Greenhouse Cluster resources is required in these scenarios.
+
 ## Architecture
 
 The operator consists of two main controllers:
@@ -81,6 +83,7 @@ spec:
     matchLabels:
       environment: production
       team: platform
+      shoot.gardener.cloud/status: "healthy"
   
   # Labels to propagate from Shoot to Greenhouse Cluster
   propagateLabels:
@@ -104,7 +107,7 @@ spec:
 | `gardenClusterName` | string | No* | Name of the Greenhouse Cluster resource representing the Garden cluster |
 | `gardenClusterKubeConfigSecretName` | SecretKeyReference | No* | Reference to a secret containing the kubeconfig for the Garden cluster |
 | `gardenNamespace` | string | Yes | Namespace in the Garden cluster where Shoots are located |
-| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected) |
+| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). It is recommended to always use `shoot.gardener.cloud/status: "healthy"` to only onboard healthy Shoots. |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
 | `disableRBAC` | bool | No | When true, skips automatic RBAC setup on Shoot clusters (default: false) |
@@ -149,7 +152,7 @@ status:
 
 ## Usage Examples
 
-### Example 1: Onboard all Shoots in a namespace
+### Example 1: Onboard all healthy Shoots in a namespace
 
 ```yaml
 apiVersion: shoot-grafter.cloudoperators/v1alpha1
@@ -160,10 +163,12 @@ metadata:
 spec:
   gardenClusterName: dev-garden
   gardenNamespace: garden--dev
-  # No shootSelector - onboards all Shoots
+  shootSelector:
+    matchLabels:
+      shoot.gardener.cloud/status: "healthy"
 ```
 
-### Example 2: Onboard Shoots with specific labels
+### Example 2: Onboard healthy Shoots with specific labels
 
 ```yaml
 apiVersion: shoot-grafter.cloudoperators/v1alpha1
@@ -177,6 +182,7 @@ spec:
   shootSelector:
     matchLabels:
       environment: production
+      shoot.gardener.cloud/status: "healthy"
   propagateLabels:
     - region
     - owned-by
@@ -197,6 +203,8 @@ spec:
   gardenClusterName: my-garden
   gardenNamespace: garden--myproject
   shootSelector:
+    matchLabels:
+      shoot.gardener.cloud/status: "healthy"
     matchExpressions:
       - key: environment
         operator: In
