@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"strings"
 
 	"shoot-grafter/api/v1alpha1"
@@ -40,7 +41,6 @@ type ShootController struct {
 	EventRecorder   record.EventRecorder // EventRecorder to emit events on the Greenhouse cluster
 }
 
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // emitEvent safely emits an event if EventRecorder is available
 func (r *ShootController) emitEvent(object client.Object, eventType, reason, message string) {
 	if r.EventRecorder != nil {
@@ -186,16 +186,12 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
 		}
-		for k, v := range annotations {
-			secret.Annotations[k] = v
-		}
+		maps.Copy(secret.Annotations, annotations)
 		// Merge labels - preserve existing ones and add/update ours
 		if secret.Labels == nil {
 			secret.Labels = make(map[string]string)
 		}
-		for k, v := range labels {
-			secret.Labels[k] = v
-		}
+		maps.Copy(secret.Labels, labels)
 		return nil
 	})
 	if err != nil {

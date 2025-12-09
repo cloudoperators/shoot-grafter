@@ -41,8 +41,6 @@ const (
 )
 
 var (
-	pollInterval  = 1 * time.Second
-	updateTimeout = 30 * time.Second
 	// Cfg is the rest.Config to access the cluster the tests are running against.
 	Cfg *rest.Config
 	// K8sClient is the client.Client to access the cluster the tests are running against.

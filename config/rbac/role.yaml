@@ -13,6 +13,7 @@ rules:
   - events
   verbs:
   - create
+  - delete
   - patch
 - apiGroups:
   - ""

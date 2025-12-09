@@ -285,13 +285,13 @@ var _ = Describe("Shoot Controller", func() {
 						Name:      "test-shoot-1",
 						Namespace: "default",
 						Labels: map[string]string{
-							"shoot-grafter.cloudoperators/careinstruction": "test-careinstruction",
+							"shoot-grafter.cloudoperators.dev/careinstruction": "test-careinstruction",
 							"foo":  "bar",
 							"baz":  "qux",
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators/careinstruction,foo,baz,quux,",
+							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators.dev/careinstruction,foo,baz,quux,",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
 					},
@@ -365,13 +365,13 @@ var _ = Describe("Shoot Controller", func() {
 						Name:      "test-shoot-1",
 						Namespace: "default",
 						Labels: map[string]string{
-							"shoot-grafter.cloudoperators/careinstruction": "test-careinstruction",
+							"shoot-grafter.cloudoperators.dev/careinstruction": "test-careinstruction",
 							"foo":  "bar",
 							"baz":  "qux",
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators/careinstruction,foo,baz,quux,",
+							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators.dev/careinstruction,foo,baz,quux,",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
 					},
@@ -384,13 +384,13 @@ var _ = Describe("Shoot Controller", func() {
 						Name:      "test-shoot-2",
 						Namespace: "default",
 						Labels: map[string]string{
-							"shoot-grafter.cloudoperators/careinstruction": "test-careinstruction",
+							"shoot-grafter.cloudoperators.dev/careinstruction": "test-careinstruction",
 							"foo":  "bar",
 							"baz":  "quux",
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators/careinstruction,foo,baz,quux,",
+							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators.dev/careinstruction,foo,baz,quux,",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-2.example.com",
 						},
 					},
@@ -463,13 +463,13 @@ var _ = Describe("Shoot Controller", func() {
 						Name:      "test-shoot-1",
 						Namespace: "default",
 						Labels: map[string]string{
-							"shoot-grafter.cloudoperators/careinstruction": "test-careinstruction",
+							"shoot-grafter.cloudoperators.dev/careinstruction": "test-careinstruction",
 							"foo":  "bar",
 							"baz":  "qux",
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators/careinstruction,foo,baz,quux,",
+							"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators.dev/careinstruction,foo,baz,quux,",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
 					},
@@ -559,7 +559,7 @@ var _ = Describe("Shoot Controller", func() {
 				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
 
 				// Check that controller-managed annotations are present
-				g.Expect(secret.Annotations).To(HaveKeyWithValue("greenhouse.sap/propagate-labels", "shoot-grafter.cloudoperators/careinstruction,foo,baz,quux,"))
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("greenhouse.sap/propagate-labels", "shoot-grafter.cloudoperators.dev/careinstruction,foo,baz,quux,"))
 				g.Expect(secret.Annotations).To(HaveKeyWithValue(greenhouseapis.SecretAPIServerURLAnnotation, "https://api-server.test-shoot-merge.example.com"))
 
 				// Check that external annotation is preserved
@@ -646,13 +646,13 @@ var _ = Describe("Shoot Controller", func() {
 				secret := secrets.Items[0]
 				g.Expect(secret.Name).To(Equal("test-shoot"), "should have the expected Secret name")
 				g.Expect(secret.Labels).To(Equal(map[string]string{
-					"shoot-grafter.cloudoperators/careinstruction": "test-careinstruction-empty-selector",
+					"shoot-grafter.cloudoperators.dev/careinstruction": "test-careinstruction-empty-selector",
 					"foo":  "bar",
 					"baz":  "qux",
 					"quux": "corge",
 				}), "should have the expected labels")
 				g.Expect(secret.Annotations).To(Equal(map[string]string{
-					"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators/careinstruction,foo,baz,quux,",
+					"greenhouse.sap/propagate-labels":           "shoot-grafter.cloudoperators.dev/careinstruction,foo,baz,quux,",
 					greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot.example.com",
 				}), "should have the expected annotations")
 				g.Expect(secret.Data).To(HaveKeyWithValue("ca.crt", []byte(base64.StdEncoding.EncodeToString([]byte("test-ca-data")))), "should have the expected data")
