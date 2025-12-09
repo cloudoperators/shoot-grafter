@@ -39,7 +39,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - shoot-grafter.cloudoperators
+  - shoot-grafter.cloudoperators.dev
   resources:
   - careinstructions
   verbs:
@@ -50,3 +50,11 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - shoot-grafter.cloudoperators.dev
+  resources:
+  - careinstructions/status
+  verbs:
+  - get
+  - patch
+  - update

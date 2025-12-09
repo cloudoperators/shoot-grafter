@@ -13,12 +13,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-shoot-grafter-cloudoperators-v1alpha1-careinstruction
+      path: /mutate-shoot-grafter-cloudoperators-dev-v1alpha1-careinstruction
   failurePolicy: Fail
   name: mcareinstruction.kb.io
   rules:
   - apiGroups:
-    - shoot-grafter.cloudoperators
+    - shoot-grafter.cloudoperators.dev
     apiVersions:
     - v1alpha1
     operations:

@@ -6,6 +6,8 @@
 
 **shoot-grafter** is a Kubernetes operator that automates the onboarding of [Gardener](https://gardener.cloud/) Shoots (Kubernetes clusters managed by Gardener) to [Greenhouse](https://github.com/cloudoperators/greenhouse), the cloud operations platform. It bridges the gap between Gardener-managed infrastructure and Greenhouse's centralized cluster management by dynamically discovering and registering Shoots as Greenhouse Clusters.
 
+The name "shoot-grafter" continues Gardener's and Greenhouse's botanical theme: just as a gardener grafts shoots onto rootstock to create robust plants, this operator grafts (connects) Gardener Shoots onto Greenhouse's centralized platform to create fully operational k8s clusters.
+
 This project is part of the [NeoNephos Foundation](https://neonephos.org/).
 
 ## What does shoot-grafter do?
@@ -18,6 +20,8 @@ shoot-grafter continuously monitors Garden clusters for Shoots matching specific
 4. **Propagates labels**: Transfers specified labels from Shoots to Greenhouse Clusters for consistent organization
 5. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
 6. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
+
+shoot-grafter currently only creates clusters matching Shoots but does not automatically clean up clusters when Shoot labels change or Shoots are deleted. Manual cleanup of Greenhouse Cluster resources is required in these scenarios.
 
 ## Architecture
 
@@ -57,7 +61,7 @@ A `CareInstruction` defines the configuration for onboarding Shoots from a speci
 ### Example CareInstruction
 
 ```yaml
-apiVersion: shoot-grafter.cloudoperators/v1alpha1
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: production-shoots
@@ -79,6 +83,7 @@ spec:
     matchLabels:
       environment: production
       team: platform
+      shoot.gardener.cloud/status: "healthy"
   
   # Labels to propagate from Shoot to Greenhouse Cluster
   propagateLabels:
@@ -102,7 +107,7 @@ spec:
 | `gardenClusterName` | string | No* | Name of the Greenhouse Cluster resource representing the Garden cluster |
 | `gardenClusterKubeConfigSecretName` | SecretKeyReference | No* | Reference to a secret containing the kubeconfig for the Garden cluster |
 | `gardenNamespace` | string | Yes | Namespace in the Garden cluster where Shoots are located |
-| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected) |
+| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). It is recommended to always use `shoot.gardener.cloud/status: "healthy"` to only onboard healthy Shoots. |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
 | `disableRBAC` | bool | No | When true, skips automatic RBAC setup on Shoot clusters (default: false) |
@@ -117,6 +122,10 @@ The CareInstruction status provides real-time information about the onboarding p
 status:
   statusConditions:
     conditions:
+      - type: Ready
+        status: "True"
+        reason: Ready
+        message: CareInstruction is ready
       - type: GardenClusterAccessReady
         status: "True"
         reason: GardenClusterAccessReady
@@ -127,11 +136,17 @@ status:
         status: "True"
         reason: Reconciled
         message: All shoots and clusters are reconciled
-  lastUpdateTime: "2025-11-18T09:00:00Z"
-  totalShoots: 15
-  failedShoots: 0
+  clusters:
+    - name: shoot-cluster-1
+      status: Ready
+    - name: shoot-cluster-2
+      status: Ready
+    - name: shoot-cluster-3
+      status: Failed
+      message: Cluster managed by different CareInstruction: other-careinstruction
+  totalShootCount: 15
   createdClusters: 15
-  failedClusters: 0
+  failedClusters: 1
 ```
 
 **Status Fields**:
@@ -140,14 +155,14 @@ status:
 - `GardenClusterAccessReady`: Indicates whether the Garden cluster is accessible
 - `ShootControllerStarted`: Shows if the dynamic Shoot controller has been started
 - `ShootsReconciled`: Reports whether all targeted Shoots have been successfully onboarded
-- `totalShoots`: Total number of Shoots matched by the selector
+- `clusters`: Detailed list of all clusters managed by this CareInstruction with their individual status (Ready/Failed) and optional message
+- `totalShootCount`: Total number of Shoots matched by the selector
 - `createdClusters`: Number of Greenhouse Clusters created by this CareInstruction
-- `failedShoots`: Number of Shoots that failed to be onboarded
 - `failedClusters`: Number of Greenhouse Clusters that are not ready
 
 ## Usage Examples
 
-### Example 1: Onboard all Shoots in a namespace
+### Example 1: Onboard all healthy Shoots in a namespace
 
 ```yaml
 apiVersion: shoot-grafter.cloudoperators/v1alpha1
@@ -158,10 +173,12 @@ metadata:
 spec:
   gardenClusterName: dev-garden
   gardenNamespace: garden--dev
-  # No shootSelector - onboards all Shoots
+  shootSelector:
+    matchLabels:
+      shoot.gardener.cloud/status: "healthy"
 ```
 
-### Example 2: Onboard Shoots with specific labels
+### Example 2: Onboard healthy Shoots with specific labels
 
 ```yaml
 apiVersion: shoot-grafter.cloudoperators/v1alpha1
@@ -175,6 +192,7 @@ spec:
   shootSelector:
     matchLabels:
       environment: production
+      shoot.gardener.cloud/status: "healthy"
   propagateLabels:
     - region
     - owned-by
@@ -195,6 +213,8 @@ spec:
   gardenClusterName: my-garden
   gardenNamespace: garden--myproject
   shootSelector:
+    matchLabels:
+      shoot.gardener.cloud/status: "healthy"
     matchExpressions:
       - key: environment
         operator: In

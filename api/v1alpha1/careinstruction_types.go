@@ -28,10 +28,16 @@ const (
 	ShootsReconciledCondition greenhousemetav1alpha1.ConditionType = "ShootsReconciled"
 
 	// CommonCleanupFinalizer is the finalizer used to clean up resources when a CareInstruction is deleted.
-	CommonCleanupFinalizer = "shoot-grafter.cloudoperators/finalizer"
+	CommonCleanupFinalizer = "shoot-grafter.cloudoperators.dev/finalizer"
 
 	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
-	CareInstructionLabel = "shoot-grafter.cloudoperators/careinstruction"
+	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
+
+	// ClusterStatusReady indicates the cluster is ready.
+	ClusterStatusReady = "Ready"
+
+	// ClusterStatusFailed indicates the cluster has failed.
+	ClusterStatusFailed = "Failed"
 )
 
 // CareInstructionSpec holds the configuration for how to onboard Gardener shoots to Greenhouse.
@@ -60,35 +66,40 @@ type CareInstructionSpec struct {
 	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`
 }
 
+// ClusterStatus represents the status of a single cluster managed by this CareInstruction.
+type ClusterStatus struct {
+	// Name of the cluster.
+	Name string `json:"name"`
+
+	// Status represents the current state of the cluster (Ready or Failed).
+	// +kubebuilder:validation:Enum=Ready;Failed
+	Status string `json:"status"`
+
+	// Message provides additional information about the cluster status when Failed.
+	Message string `json:"message,omitempty"`
+}
+
 // CareInstructionStatus holds the status of the CareInstruction.
 type CareInstructionStatus struct {
 	// StatusConditions represent the latest available observations of the CareInstruction's current state.
 	greenhousemetav1alpha1.StatusConditions `json:"statusConditions,omitempty"`
 
-	// LastUpdateTime is the last time the all shoots targeted by this CareInstruction were reconciled.
-	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`
+	// Clusters is a list of clusters managed by this CareInstruction with their detailed status.
+	Clusters []ClusterStatus `json:"clusters,omitempty"`
 
 	// TotalShootCount is the total number of shoots targeted by this CareInstruction.
 	TotalShoots int `json:"totalShootCount,omitempty"`
-
-	// FailedShoots is the number of shoots that failed to be onboarded to Greenhouse.
-	FailedShoots int `json:"failedShoots,omitempty"`
 
 	// CreatedClusters is the number of clusters created by this CareInstruction.
 	CreatedClusters int `json:"createdClusters,omitempty"`
 
 	// FailedClusters is the number of clusters that failed to be created by this CareInstruction.
 	FailedClusters int `json:"failedClusters,omitempty"`
-
-	// ReadyClusterNames is the list of cluster names that are ready.
-	ReadyClusterNames []string `json:"readyClusterNames,omitempty"`
-
-	// NotReadyClusterNames is the list of cluster names that are not ready.
-	NotReadyClusterNames []string `json:"notReadyClusterNames,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=ci
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="SeedCluster",type="string",JSONPath=".spec.seedClusterName"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=`.status.statusConditions.conditions[?(@.type == "Ready")].status`
@@ -121,9 +132,9 @@ func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Cl
 }
 
 // ListClusters returns a list of clusters created by this CareInstruction identified by  owning CareInstruction label.
-func (c *CareInstruction) ListClusters(ctx context.Context, greenhouseClient client.Client, namespace string) (greenhousev1alpha1.ClusterList, error) {
+func (c *CareInstruction) ListClusters(ctx context.Context, greenhouseClient client.Client) (greenhousev1alpha1.ClusterList, error) {
 	clusterList := greenhousev1alpha1.ClusterList{}
-	if err := greenhouseClient.List(ctx, &clusterList, client.InNamespace(namespace), client.MatchingLabels{
+	if err := greenhouseClient.List(ctx, &clusterList, client.InNamespace(c.GetNamespace()), client.MatchingLabels{
 		CareInstructionLabel: c.Name,
 	}); err != nil {
 		return greenhousev1alpha1.ClusterList{}, err

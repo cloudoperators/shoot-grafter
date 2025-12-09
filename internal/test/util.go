@@ -36,16 +36,33 @@ func ReconcileObject(obj client.Object) {
 	}).Should(Succeed(), "should update resource to force reconciliation")
 }
 
+func WaitForPortFree(host string, port int) {
+	// wait for the port to be free (not in use)
+	dialer := &net.Dialer{Timeout: 100 * time.Millisecond}
+	addrPort := net.JoinHostPort(host, strconv.Itoa(port))
+	Eventually(func() error {
+		conn, err := dialer.Dial("tcp", addrPort)
+		if err != nil {
+			// Port is free (connection failed)
+			return nil //nolint:nilerr // returning nil when port is free is intentional
+		}
+		// Port is in use, close connection and retry
+		if closeErr := conn.Close(); closeErr != nil {
+			return closeErr
+		}
+		return fmt.Errorf("port %d is still in use", port)
+	}).WithTimeout(2*time.Minute).WithPolling(100*time.Millisecond).Should(Succeed(), "port should eventually be free")
+}
+
 func WaitForWebhookServerReady(host string, port int) {
 	// wait for the webhook server to get ready
 	dialer := &net.Dialer{Timeout: time.Second}
-	addrPort := fmt.Sprintf("%s:%d", host, port)
+	addrPort := net.JoinHostPort(host, strconv.Itoa(port))
 	Eventually(func() error {
 		conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec
 		if err != nil {
 			return err
 		}
-		conn.Close()
-		return nil
-	}, updateTimeout, pollInterval).Should(Succeed(), "there should be no error dialing the webhook server")
+		return conn.Close()
+	}).WithTimeout(30*time.Second).WithPolling(1*time.Second).Should(Succeed(), "there should be no error dialing the webhook server")
 }

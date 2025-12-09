@@ -32,7 +32,7 @@ var (
 	mgrCtx          context.Context
 	mgrCancel       context.CancelFunc
 )
-var _ = Describe("CareInstruction Controller", func() {
+var _ = Describe("Shoot Controller", func() {
 	JustBeforeEach(func() {
 		// register controllers in JustBeforeEach, as they depend on the CareInstruction.
 		// Create CareInstruction in BeforeEach
@@ -40,7 +40,10 @@ var _ = Describe("CareInstruction Controller", func() {
 		host := test.TestEnv.WebhookInstallOptions.LocalServingHost
 		port := test.TestEnv.WebhookInstallOptions.LocalServingPort
 
-		// Create a manager for the Garden cluster (where the ShootController watches Shoots)
+		// Wait for the port to be free before starting the manager
+		// This avoids conflicts when tests run in parallel
+		test.WaitForPortFree(host, port)
+
 		mgr, err := ctrl.NewManager(test.GardenCfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Metrics: server.Options{
@@ -69,6 +72,7 @@ var _ = Describe("CareInstruction Controller", func() {
 		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager")
 
 		// Create ShootController with EventRecorder from Greenhouse manager
+		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the manager")
 		Expect((&shoot.ShootController{
 			GreenhouseClient: test.K8sClient,
 			GardenClient:     test.GardenK8sClient,

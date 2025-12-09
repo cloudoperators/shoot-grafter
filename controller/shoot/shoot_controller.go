@@ -12,6 +12,7 @@ import (
 	"shoot-grafter/api/v1alpha1"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
+	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -71,6 +72,22 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.Info("Reconciling Shoot", "name", req.Name, "namespace", req.Namespace)
 
+	// Check if a cluster with this name already exists and is owned by a different CareInstruction
+	// Do this early to avoid unnecessary work
+	var existingCluster greenhousev1alpha1.Cluster
+	err := r.GreenhouseClient.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: r.CareInstruction.Namespace}, &existingCluster)
+	if err == nil {
+		// Cluster exists - check ownership
+		if ownerLabel, hasLabel := existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
+			// TODO: emit event on CareInstruction
+			r.Info("Skipping shoot - cluster already owned by different CareInstruction",
+				"shoot", req.Name,
+				"currentOwner", ownerLabel,
+				"attemptedOwner", r.CareInstruction.Name)
+			return ctrl.Result{}, nil
+		}
+	}
+
 	var shoot gardenerv1beta1.Shoot
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, &shoot); err != nil {
 		r.Info("unable to fetch Shoot")
@@ -101,21 +118,26 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	labels := map[string]string{
 		v1alpha1.CareInstructionLabel: r.CareInstruction.Name,
 	}
-	labelPropagateString := v1alpha1.CareInstructionLabel + ","
+	var labelPropagateBuilder strings.Builder
+	labelPropagateBuilder.WriteString(v1alpha1.CareInstructionLabel)
+	labelPropagateBuilder.WriteString(",")
 	// get labels specified via TransportLabels on the CareInstruction from the shoot
 	for _, v := range r.CareInstruction.Spec.PropagateLabels {
 		if labelValue, ok := shoot.Labels[v]; ok {
 			labels[v] = labelValue
-			labelPropagateString += v + ","
+			labelPropagateBuilder.WriteString(v)
+			labelPropagateBuilder.WriteString(",")
 		}
 	}
 	// get additional labels specified via AdditionalLabels on the CareInstruction
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
 		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
 			labels[k] = v
-			labelPropagateString += k + ","
+			labelPropagateBuilder.WriteString(k)
+			labelPropagateBuilder.WriteString(",")
 		}
 	}
+	labelPropagateString := labelPropagateBuilder.String()
 
 	annotations := map[string]string{
 		"greenhouse.sap/propagate-labels":           labelPropagateString,
@@ -132,16 +154,16 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
-	CAData := cm.Data["ca.crt"]
-	if CAData == "" {
+	caData := cm.Data["ca.crt"]
+	if caData == "" {
 		r.Info("no CA data found in ConfigMap for Shoot", "name", cm.Name)
 		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CADataMissing",
 			fmt.Sprintf("No CA data found in ConfigMap %s for shoot %s/%s", cm.Name, shoot.Namespace, shoot.Name))
 		return ctrl.Result{}, nil
 	}
-	CADataBytes := []byte(CAData)
-	CADataBase64Enc := make([]byte, base64.StdEncoding.EncodedLen(len(CADataBytes)))
-	base64.StdEncoding.Encode(CADataBase64Enc, CADataBytes)
+	caDataBytes := []byte(caData)
+	caDataBase64Enc := make([]byte, base64.StdEncoding.EncodedLen(len(caDataBytes)))
+	base64.StdEncoding.Encode(caDataBase64Enc, caDataBytes)
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -151,14 +173,14 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Labels:      labels,
 		},
 		Data: map[string][]byte{
-			"ca.crt": CADataBase64Enc,
+			"ca.crt": caDataBase64Enc,
 		},
 		Type: greenhouseapis.SecretTypeOIDCConfig,
 	}
 
 	result, err := ctrl.CreateOrUpdate(ctx, r.GreenhouseClient, secret, func() error {
 		secret.Data = map[string][]byte{
-			"ca.crt": CADataBase64Enc,
+			"ca.crt": caDataBase64Enc,
 		}
 		// Merge annotations - preserve existing ones and add/update ours
 		if secret.Annotations == nil {
