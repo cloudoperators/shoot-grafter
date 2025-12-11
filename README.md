@@ -96,21 +96,21 @@ spec:
     managed-by: shoot-grafter
     onboarding-source: garden-prod
   
-  # Disable automatic RBAC configuration (default: false)
-  disableRBAC: false
+  # Enable automatic RBAC configuration (default: true)
+  enableRBAC: true
 ```
 
 ### CareInstruction Spec Fields
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Description |‚
 |-------|------|----------|-------------|
-| `gardenClusterName` | string | No* | Name of the Greenhouse Cluster resource representing the Garden cluster |
+| `gardenClusterName` | string | No*| Name of the Greenhouse Cluster resource representing the Garden cluster |
 | `gardenClusterKubeConfigSecretName` | SecretKeyReference | No* | Reference to a secret containing the kubeconfig for the Garden cluster |
 | `gardenNamespace` | string | Yes | Namespace in the Garden cluster where Shoots are located |
 | `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). It is recommended to always use `shoot.gardener.cloud/status: "healthy"` to only onboard healthy Shoots. |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
-| `disableRBAC` | bool | No | When true, skips automatic RBAC setup on Shoot clusters (default: false) |
+| `enableRBAC` | bool | No | When false, skips automatic RBAC setup on Shoot clusters (default: true‚) |
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
 
