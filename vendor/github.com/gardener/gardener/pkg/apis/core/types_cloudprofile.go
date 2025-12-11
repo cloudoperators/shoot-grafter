@@ -71,11 +71,11 @@ type CloudProfileSpec struct {
 	// Limits configures operational limits for Shoot clusters using this CloudProfile.
 	// See https://github.com/gardener/gardener/blob/master/docs/usage/shoot/shoot_limits.md.
 	Limits *Limits
-	// Capabilities contains the definition of all possible capabilities in the CloudProfile.
+	// MachineCapabilities contains the definition of all possible capabilities in the CloudProfile.
 	// Only capabilities and values defined here can be used to describe MachineImages and MachineTypes.
 	// The order of values for a given capability is relevant. The most important value is listed first.
 	// During maintenance upgrades, the image that matches most capabilities will be selected.
-	Capabilities []CapabilityDefinition
+	MachineCapabilities []CapabilityDefinition
 }
 
 // SeedSelector contains constraints for selecting seed to be usable for shoots using a profile
@@ -124,9 +124,9 @@ type MachineImageVersion struct {
 	KubeletVersionConstraint *string
 	// InPlaceUpdates contains the configuration for in-place updates for this machine image version.
 	InPlaceUpdates *InPlaceUpdates
-	// CapabilitySets is an array of capability sets. Each entry represents a combination of capabilities that is provided by
+	// CapabilityFlavors is an array of MachineImageFlavor. Each entry represents a combination of capabilities that is provided by
 	// the machine image version.
-	CapabilitySets []CapabilitySet
+	CapabilityFlavors []MachineImageFlavor
 }
 
 // SupportsArchitecture checks if the machine image version supports a given architecture.
@@ -134,7 +134,7 @@ func (m *MachineImageVersion) SupportsArchitecture(capabilities Capabilities, ar
 	if len(capabilities) == 0 {
 		return slices.Contains(m.Architectures, architecture)
 	}
-	for _, capability := range m.CapabilitySets {
+	for _, capability := range m.CapabilityFlavors {
 		if slices.Contains(capability.Capabilities[constants.ArchitectureName], architecture) {
 			return true
 		}
@@ -171,14 +171,6 @@ type MachineType struct {
 	Architecture *string
 	// Capabilities contains the machine type capabilities.
 	Capabilities Capabilities
-}
-
-// GetArchitecture returns the architecture of the machine type.
-func (m *MachineType) GetArchitecture() string {
-	if len(m.Capabilities[constants.ArchitectureName]) == 1 {
-		return m.Capabilities[constants.ArchitectureName][0]
-	}
-	return ptr.Deref(m.Architecture, "")
 }
 
 // MachineTypeStorage is the amount of storage associated with the root volume of this machine type.
@@ -327,8 +319,30 @@ type CapabilityValues []string
 // Capabilities of a machine type or machine image.
 type Capabilities map[string]CapabilityValues
 
-// CapabilitySet is a wrapper for Capabilities.
+// MachineImageFlavor is a wrapper for Capabilities.
 // This is a workaround as the Protobuf generator can't handle a slice of maps.
-type CapabilitySet struct {
+type MachineImageFlavor struct {
 	Capabilities
+}
+
+// GetArchitecture returns the architecture of the machine type.
+func (m *MachineType) GetArchitecture(capabilityDefinitions []CapabilityDefinition) string {
+	capabilityArchitecture := GetCapabilitiesWithAppliedDefaults(m.Capabilities, capabilityDefinitions)[constants.ArchitectureName]
+	if len(capabilityArchitecture) == 1 {
+		return capabilityArchitecture[0]
+	}
+	return ptr.Deref(m.Architecture, "")
+}
+
+// GetCapabilitiesWithAppliedDefaults returns new capabilities with applied defaults from the capability definitions.
+func GetCapabilitiesWithAppliedDefaults(capabilities Capabilities, capabilityDefinitions []CapabilityDefinition) Capabilities {
+	result := make(Capabilities, len(capabilityDefinitions))
+	for _, capabilityDefinition := range capabilityDefinitions {
+		if values, ok := capabilities[capabilityDefinition.Name]; ok {
+			result[capabilityDefinition.Name] = values
+		} else {
+			result[capabilityDefinition.Name] = capabilityDefinition.Values
+		}
+	}
+	return result
 }

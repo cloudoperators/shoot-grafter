@@ -60,6 +60,12 @@ spec:
                 description: AdditionalLabels are labels that will be added to every
                   Greenhouse Cluster created by this CareInstruction.
                 type: object
+              enableRBAC:
+                default: true
+                description: EnableRBAC indicates whether the automatic configuration
+                  of RBAC roles and role bindings for the Greenhouse service account
+                  on the shoot cluster should is enabled. Defaulted to true.
+                type: boolean
               gardenClusterKubeConfigSecretName:
                 description: |-
                   GardenClusterKubeConfigSecretName is a reference to the secret containing the kubeconfig for the Garden cluster.
