@@ -231,6 +231,59 @@ spec:
     onboarding-method: shoot-grafter
 ```
 
+## Debugging Shoot Reconciliation
+
+shoot-grafter emits Kubernetes events to help you monitor and debug the Shoot onboarding process. Events are associated with the CareInstruction resource.
+
+### View Events for a CareInstruction
+
+To see all events related to a specific CareInstruction:
+
+```bash
+# View events in the resource description
+kubectl describe careinstruction <careinstruction-name> -n <namespace>
+
+# List all events for a specific CareInstruction
+kubectl get events -n <namespace> \
+  --field-selector involvedObject.name=<careinstruction-name>
+
+# Filter events by reason
+kubectl get events -n <namespace> \
+  --field-selector involvedObject.name=<careinstruction-name>,reason=ShootReconciled
+
+# Watch events in real-time
+kubectl get events -n <namespace> \
+  --field-selector involvedObject.name=<careinstruction-name> \
+  --watch
+```
+
+### Event Types
+
+shoot-grafter emits the following events during Shoot reconciliation:
+
+#### Normal Events (Successful Operations)
+
+| Event Reason | Description |
+|-------------|-------------|
+| `ShootReconciling` | Reconciliation has started for a Shoot |
+| `ShootReconciled` | Successfully completed reconciliation for a Shoot |
+| `SecretCreated` | Created Greenhouse secret with cluster credentials |
+| `SecretUpdated` | Updated existing Greenhouse secret with new credentials |
+| `ShootDeleted` | Shoot was deleted from the Garden cluster |
+
+#### Warning Events (Issues Requiring Attention)
+
+| Event Reason | Description | Resolution |
+|-------------|-------------|------------|
+| `APIServerURLMissing` | Shoot doesn't have an external API server URL | Check Shoot status in Garden cluster; ensure Shoot is fully reconciled |
+| `CAConfigMapFetchFailed` | Failed to fetch CA certificate ConfigMap | Verify ConfigMap `<shoot-name>.ca-cluster` exists in Garden namespace |
+| `CADataMissing` | CA certificate data is empty in ConfigMap | Check ConfigMap data contains valid `ca.crt` entry |
+| `SecretOperationFailed` | Failed to create or update Greenhouse secret | Check RBAC permissions and Greenhouse cluster connectivity |
+
+### Event Retention
+
+Kubernetes automatically cleans up events after a TTL period (typically 1 hour by default). This TTL can be configured via the `--event-ttl` flag on the kube-apiserver.
+
 ## Support, Feedback, Contributing
 
 This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/cloudoperators/shoot-grafter/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).

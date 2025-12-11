@@ -59,6 +59,7 @@ type careInstructionContextKey struct{}
 // +kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Setup the controller with the manager
@@ -285,12 +286,14 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 
 	// Register the ShootController with the garden manager
+	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster
 	sc := &shoot.ShootController{
 		GreenhouseClient: r.Client,
 		GardenClient:     gardenClient,
 		Logger:           r.WithValues("careInstruction", careInstruction.Name),
 		Name:             shoot.GenerateName(careInstruction.Name),
 		CareInstruction:  careInstruction.DeepCopy(),
+		EventRecorder:    r.GetEventRecorderFor(shoot.GenerateName(careInstruction.Name)),
 	}
 	if err := sc.SetupWithManager(shootControllerMgr); err != nil {
 		return err

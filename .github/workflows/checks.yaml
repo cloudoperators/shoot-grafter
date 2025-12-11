@@ -40,14 +40,14 @@ jobs:
         run: make run-shellcheck
       - name: Dependency Licenses Review
         run: make check-dependency-licenses
-      # - name: Check for spelling errors
-      #   uses: reviewdog/action-misspell@v1
-      #   with:
-      #     exclude: ./vendor/*
-      #     fail_on_error: false
-      #     github_token: ${{ secrets.GITHUB_TOKEN }}
-      #     ignore: importas
-      #     reporter: github-check
+      - name: Check for spelling errors
+        uses: reviewdog/action-misspell@v1
+        with:
+          exclude: ./vendor/*
+          fail_on_error: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: importas
+          reporter: github-check
       - name: Check if source code files have license header
         run: make check-addlicense
       - name: Install govulncheck
