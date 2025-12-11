@@ -33,6 +33,9 @@ const (
 	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
 	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
+	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
+	AuthConfigMapLabel = "shoot-grafter.cloudoperators/authconfigmap"
+
 	// ClusterStatusReady indicates the cluster is ready.
 	ClusterStatusReady = "Ready"
 
@@ -68,6 +71,13 @@ type CareInstructionSpec struct {
 	// EnableRBAC indicates whether the automatic configuration of RBAC roles and role bindings for the Greenhouse service account on the shoot cluster should is enabled. Defaulted to true.
 	// +kubebuilder:default=true
 	EnableRBAC bool `json:"enableRBAC,omitempty"`
+
+	// AuthenticationConfigMapName is a reference to a ConfigMap in the Greenhouse cluster
+	// containing an AuthenticationConfiguration (config.yaml key with apiserver.config.k8s.io/v1beta1 content).
+	// When set, the shoot controller will merge this configuration with any existing configuration
+	// on the Garden cluster and configure the Shoot to use the merged authentication configuration.
+	// This allows specifying multiple OIDC issuers or having more control over the authentication setup.
+	AuthenticationConfigMapName string `json:"authenticationConfigMapName,omitempty"`
 }
 
 // ClusterStatus represents the status of a single cluster managed by this CareInstruction.
@@ -101,6 +111,7 @@ type CareInstructionStatus struct {
 	FailedClusters int `json:"failedClusters,omitempty"`
 }
 
+// +kubebuilder:resource:shortName=ci
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ci

@@ -225,6 +225,20 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
+	// Configure OIDC authentication if AuthenticationConfigMapName is set
+	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
+	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
+		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
+			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
+				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
+			return ctrl.Result{}, err
+		}
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
+			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+	}
+
+	// Set up RBAC if enabled in the CareInstruction
 	if r.CareInstruction.Spec.EnableRBAC {
 		shootClient, err := getShootClusterClient(ctx, r.GardenClient, &shoot)
 		if err != nil {
@@ -235,6 +249,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		r.setRBAC(ctx, shootClient, shoot.GetName())
 	}
+
 	return ctrl.Result{}, nil
 }
 
