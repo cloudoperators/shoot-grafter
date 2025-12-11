@@ -111,7 +111,6 @@ type CareInstructionStatus struct {
 	FailedClusters int `json:"failedClusters,omitempty"`
 }
 
-// +kubebuilder:resource:shortName=ci
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ci
