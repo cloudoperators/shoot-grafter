@@ -40,7 +40,10 @@ install-golangci-lint: FORCE
 	@if ! hash golangci-lint 2>/dev/null; then printf "\e[1;36m>> Installing golangci-lint (this may take a while)...\e[0m\n"; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; fi
 
 install-shellcheck: FORCE
-	@if ! hash shellcheck 2>/dev/null; then printf "\e[1;36m>> Installing shellcheck...\e[0m\n"; SHELLCHECK_ARCH=$(shell uname -m); if [[ "$$SHELLCHECK_ARCH" == "arm64" ]]; then SHELLCHECK_ARCH=aarch64; fi; SHELLCHECK_OS=$(shell uname -s | tr '[:upper:]' '[:lower:]'); SHELLCHECK_VERSION="stable"; if command -v curl >/dev/null 2>&1; then GET="curl -sLo-"; elif command -v wget >/dev/null 2>&1; then GET="wget -O-"; else echo "Didn't find curl or wget to download shellcheck"; exit 2; fi; $$GET "https://github.com/koalaman/shellcheck/releases/download/$$SHELLCHECK_VERSION/shellcheck-$$SHELLCHECK_VERSION.$$SHELLCHECK_OS.$$SHELLCHECK_ARCH.tar.xz" | tar -Jxf -; BIN=$$(go env GOBIN); if [[ -z $$BIN ]]; then BIN=$$(go env GOPATH)/bin; fi; install -Dm755 shellcheck-$$SHELLCHECK_VERSION/shellcheck -t "$$BIN"; rm -rf shellcheck-$$SHELLCHECK_VERSION; fi
+	@set -eou pipefail;  if ! hash shellcheck 2>/dev/null; then printf "\e[1;36m>> Installing shellcheck...\e[0m\n"; SHELLCHECK_ARCH=$$(uname -m); if [[ "$$SHELLCHECK_ARCH" == "arm64" ]]; then SHELLCHECK_ARCH=aarch64; fi; SHELLCHECK_OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); SHELLCHECK_VERSION="stable"; if command -v curl >/dev/null 2>&1; then GET="curl -sLo-"; elif command -v wget >/dev/null 2>&1; then GET="wget -O-"; else echo "Didn't find curl or wget to download shellcheck"; exit 2; fi; $$GET "https://github.com/koalaman/shellcheck/releases/download/$$SHELLCHECK_VERSION/shellcheck-$$SHELLCHECK_VERSION.$$SHELLCHECK_OS.$$SHELLCHECK_ARCH.tar.xz" | tar -Jxf -; BIN=$$(go env GOBIN); if [[ -z $$BIN ]]; then BIN=$$(go env GOPATH)/bin; fi; install -Dm755 shellcheck-$$SHELLCHECK_VERSION/shellcheck -t "$$BIN"; rm -rf shellcheck-$$SHELLCHECK_VERSION; fi
+
+install-typos: FORCE
+	@set -eou pipefail;  if ! hash typos 2>/dev/null; then printf "\e[1;36m>> Installing typos...\e[0m\n"; TYPOS_ARCH=$$(uname -m); if [[ "$$TYPOS_ARCH" == "arm64" ]]; then TYPOS_ARCH=aarch64; fi; if command -v curl >/dev/null 2>&1; then GET="curl $${GITHUB_TOKEN:+" -u \":$$GITHUB_TOKEN\""} -sLo-"; elif command -v wget >/dev/null 2>&1; then GET="wget $${GITHUB_TOKEN:+" --password \"$$GITHUB_TOKEN\""} -O-"; else echo "Didn't find curl or wget to download typos"; exit 2; fi; if command -v gh >/dev/null; then TYPOS_GET_RELEASE_JSON="gh api /repos/crate-ci/typos/releases"; else TYPOS_GET_RELEASE_JSON="$$GET https://api.github.com/repos/crate-ci/typos/releases"; fi; TYPOS_VERSION=$$($$TYPOS_GET_RELEASE_JSON | jq -r '.[0].name' ); if [[ $(UNAME_S) == Darwin ]]; then TYPOS_FILE="typos-$$TYPOS_VERSION-$$TYPOS_ARCH-apple-darwin.tar.gz"; elif [[ $(UNAME_S) == Linux ]]; then TYPOS_FILE="typos-$$TYPOS_VERSION-$$TYPOS_ARCH-unknown-linux-musl.tar.gz"; fi; mkdir -p typos; $$GET ""https://github.com/crate-ci/typos/releases/download/$$TYPOS_VERSION/$$TYPOS_FILE"" | tar -C typos -zxf -; BIN=$$(go env GOBIN); if [[ -z $$BIN ]]; then BIN=$$(go env GOPATH)/bin; fi; install -Dm755 typos/typos -t "$$BIN"; rm -rf typos/; fi
 
 install-go-licence-detector: FORCE
 	@if ! hash go-licence-detector 2>/dev/null; then printf "\e[1;36m>> Installing go-licence-detector (this may take a while)...\e[0m\n"; go install go.elastic.co/go-licence-detector@latest; fi
@@ -48,7 +51,7 @@ install-go-licence-detector: FORCE
 install-addlicense: FORCE
 	@if ! hash addlicense 2>/dev/null; then printf "\e[1;36m>> Installing addlicense (this may take a while)...\e[0m\n"; go install github.com/google/addlicense@latest; fi
 
-prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-go-licence-detector install-addlicense
+prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos install-go-licence-detector install-addlicense
 
 install-controller-gen: FORCE
 	@if ! hash controller-gen 2>/dev/null; then printf "\e[1;36m>> Installing controller-gen (this may take a while)...\e[0m\n"; go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest; fi
@@ -70,7 +73,7 @@ build/shoot-grafter: FORCE generate
 	env $(GO_BUILDENV) go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/shoot-grafter .
 
 DESTDIR =
-ifeq ($(shell uname -s),Darwin)
+ifeq ($(UNAME_S),Darwin)
 	PREFIX = /usr/local
 else
 	PREFIX = /usr
@@ -109,6 +112,10 @@ run-golangci-lint: FORCE install-golangci-lint
 run-shellcheck: FORCE install-shellcheck
 	@printf "\e[1;36m>> shellcheck\e[0m\n"
 	@find . \( -path './vendor/*' -prune \) -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.zsh' -o -name '*.sh' -o -name '*.shlib' \) -exec shellcheck  {} +
+
+run-typos: FORCE install-typos
+	@printf "\e[1;36m>> typos\e[0m\n"
+	@typos
 
 build/cover.out: FORCE generate install-setup-envtest | build
 	@printf "\e[1;36m>> Running tests\e[0m\n"
@@ -190,6 +197,7 @@ help: FORCE
 	@printf "  \e[36minstall-goimports\e[0m            Install goimports required by goimports/static-check\n"
 	@printf "  \e[36minstall-golangci-lint\e[0m        Install golangci-lint required by run-golangci-lint/static-check\n"
 	@printf "  \e[36minstall-shellcheck\e[0m           Install shellcheck required by run-shellcheck/static-check\n"
+	@printf "  \e[36minstall-typos\e[0m                Install typos required by run-typos/static-check\n"
 	@printf "  \e[36minstall-go-licence-detector\e[0m  Install-go-licence-detector required by check-dependency-licenses/static-check\n"
 	@printf "  \e[36minstall-addlicense\e[0m           Install addlicense required by check-license-headers/license-headers/static-check\n"
 	@printf "  \e[36mprepare-static-check\e[0m         Install any tools required by static-check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
@@ -206,6 +214,7 @@ help: FORCE
 	@printf "  \e[36mgenerate\e[0m                     Generate code for Kubernetes CRDs and deepcopy.\n"
 	@printf "  \e[36mrun-golangci-lint\e[0m            Install and run golangci-lint. Installing is used in CI, but you should probably install golangci-lint using your package manager.\n"
 	@printf "  \e[36mrun-shellcheck\e[0m               Install and run shellcheck. Installing is used in CI, but you should probably install shellcheck using your package manager.\n"
+	@printf "  \e[36mrun-typos\e[0m                    Check for spelling errors using typos.\n"
 	@printf "  \e[36mbuild/cover.out\e[0m              Run tests and generate coverage report.\n"
 	@printf "  \e[36mbuild/cover.html\e[0m             Generate an HTML file with source code annotations from the coverage report.\n"
 	@printf "  \e[36mcheck-addlicense\e[0m             Check license headers in all non-vendored .go files with addlicense.\n"

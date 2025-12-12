@@ -15,6 +15,7 @@ mkShell {
     kubernetes-controller-tools # controller-gen
     renovate
     setup-envtest
+    typos
     # keep this line if you use bash
     bashInteractive
   ];
