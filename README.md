@@ -115,7 +115,7 @@ spec:
 | `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). It is recommended to always use `shoot.gardener.cloud/status: "healthy"` to only onboard healthy Shoots. |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
-| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration (config.yaml with apiserver.config.k8s.io/v1beta1 content) |
+| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)|
 | `enableRBAC` | bool | No | When false, skips automatic RBAC setup on Shoot clusters (default: true‚) |
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
