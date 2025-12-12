@@ -199,7 +199,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// Check if the error is due to a conflict (concurrent update)
 		// In this case, just requeue without emitting an event
 		if apierrors.IsConflict(err) || strings.Contains(err.Error(), "the object has been modified") {
-			r.Info("Secret was modified concurrently, requeueing", "name", shoot.Name)
+			r.Info("Secret was modified concurrently, requeuing", "name", shoot.Name)
 			return ctrl.Result{Requeue: true}, nil
 		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
