@@ -160,6 +160,10 @@ type SeedDNS struct {
 	// Internal configures DNS settings related to seed internal domain.
 	// +optional
 	Internal *SeedDNSProviderConfig `json:"internal,omitempty" protobuf:"bytes,3,opt,name=internal"`
+	// Defaults configures DNS settings related to seed default domains.
+	// When determining the DNS settings for a Shoot, the first matching entry in this list will take precedence.
+	// +optional
+	Defaults []SeedDNSProviderConfig `json:"defaults,omitempty" protobuf:"bytes,4,rep,name=defaults"`
 }
 
 // SeedDNSProviderConfig configures a DNS provider.
@@ -339,6 +343,14 @@ type SeedSettingLoadBalancerServices struct {
 	// Defaults to nil, which is equivalent to not allowing ProxyProtocol.
 	// +optional
 	ProxyProtocol *LoadBalancerServicesProxyProtocol `json:"proxyProtocol,omitempty" protobuf:"bytes,4,opt,name=proxyProtocol"`
+	// ZonalIngress controls whether ingress gateways are deployed per availability zone.
+	// Defaults to true.
+	// +optional
+	ZonalIngress *SeedSettingLoadBalancerServicesZonalIngress `json:"zonalIngress,omitempty" protobuf:"bytes,5,opt,name=zonalIngress"`
+	// Class configures the Service.spec.loadBalancerClass field for the load balancer services on the seed.
+	// Note that changing the loadBalancerClass of existing LoadBalancer services is denied by Kubernetes.
+	// +optional
+	Class *string `json:"class,omitempty" protobuf:"bytes,6,opt,name=class"`
 }
 
 // SeedSettingLoadBalancerServicesZones controls settings, which are specific to the single-zone load balancers in a
@@ -368,6 +380,16 @@ type LoadBalancerServicesProxyProtocol struct {
 	// The option allows a migration from non-ProxyProtocol to ProxyProtocol without downtime (depending on the infrastructure).
 	// Defaults to false.
 	Allowed bool `json:"allowed" protobuf:"bytes,1,opt,name=allowed"`
+}
+
+// SeedSettingLoadBalancerServicesZonalIngress controls the deployment of ingress gateways per availability zone.
+type SeedSettingLoadBalancerServicesZonalIngress struct {
+	// Enabled controls whether seed ingress gateways are deployed in each availability zone.
+	// Defaults to true, which provisions an ingress gateway load balancer for each availability zone.
+	// When disabled, only a single ingress gateway is deployed.
+	// See https://github.com/gardener/gardener/blob/master/docs/operations/seed_settings.md#zonal-ingress.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty" protobuf:"bytes,1,opt,name=enabled"`
 }
 
 // SeedSettingVerticalPodAutoscaler controls certain settings for the vertical pod autoscaler components deployed in the
@@ -468,8 +490,6 @@ const (
 	SeedBackupBucketsReady ConditionType = "BackupBucketsReady"
 	// SeedExtensionsReady is a constant for a condition type indicating that the extensions are ready.
 	SeedExtensionsReady ConditionType = "ExtensionsReady"
-	// SeedGardenletReady is a constant for a condition type indicating that the Gardenlet is ready.
-	SeedGardenletReady ConditionType = "GardenletReady"
 	// SeedSystemComponentsHealthy is a constant for a condition type indicating the system components health.
 	SeedSystemComponentsHealthy ConditionType = "SeedSystemComponentsHealthy"
 	// SeedEmergencyStopShootReconciliations is a constant for a condition type indicating disabled shoot reconciliations.

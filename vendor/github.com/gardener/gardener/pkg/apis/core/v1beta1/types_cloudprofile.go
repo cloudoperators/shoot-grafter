@@ -89,12 +89,12 @@ type CloudProfileSpec struct {
 	// See https://github.com/gardener/gardener/blob/master/docs/usage/shoot/shoot_limits.md.
 	// +optional
 	Limits *Limits `json:"limits,omitempty" protobuf:"bytes,11,opt,name=limits"`
-	// Capabilities contains the definition of all possible capabilities in the CloudProfile.
+	// MachineCapabilities contains the definition of all possible capabilities in the CloudProfile.
 	// Only capabilities and values defined here can be used to describe MachineImages and MachineTypes.
 	// The order of values for a given capability is relevant. The most important value is listed first.
 	// During maintenance upgrades, the image that matches most capabilities will be selected.
 	// +optional
-	Capabilities []CapabilityDefinition `json:"capabilities,omitempty" protobuf:"bytes,12,rep,name=capabilities"`
+	MachineCapabilities []CapabilityDefinition `json:"machineCapabilities,omitempty" protobuf:"bytes,12,rep,name=machineCapabilities"`
 }
 
 // SeedSelector contains constraints for selecting seed to be usable for shoots using a profile
@@ -153,10 +153,10 @@ type MachineImageVersion struct {
 	// InPlaceUpdates contains the configuration for in-place updates for this machine image version.
 	// +optional
 	InPlaceUpdates *InPlaceUpdates `json:"inPlaceUpdates,omitempty" protobuf:"bytes,5,opt,name=inPlaceUpdates"`
-	// CapabilitySets is an array of capability sets. Each entry represents a combination of capabilities that is provided by
+	// CapabilityFlavors is an array of MachineImageFlavor. Each entry represents a combination of capabilities that is provided by
 	// the machine image version.
 	// +optional
-	CapabilitySets []CapabilitySet `json:"capabilitySets,omitempty" protobuf:"bytes,6,rep,name=capabilitySets"`
+	CapabilityFlavors []MachineImageFlavor `json:"capabilityFlavors,omitempty" protobuf:"bytes,6,rep,name=capabilityFlavors"`
 }
 
 // ExpirableVersion contains a version and an expiration date.
@@ -194,31 +194,6 @@ type MachineType struct {
 	// Capabilities contains the machine type capabilities.
 	// +optional
 	Capabilities Capabilities `json:"capabilities,omitempty" protobuf:"bytes,8,rep,name=capabilities,casttype=Capabilities"`
-}
-
-// GetArchitecture returns the architecture of the machine type.
-func (m *MachineType) GetArchitecture(capabilityDefinitions []CapabilityDefinition) string {
-	if len(capabilityDefinitions) == 0 {
-		return ptr.Deref(m.Architecture, "")
-	}
-
-	if len(m.Capabilities[constants.ArchitectureName]) == 1 {
-		return m.Capabilities[constants.ArchitectureName][0]
-	}
-
-	if len(m.Capabilities[constants.ArchitectureName]) == 0 {
-		for _, capabilityDefinition := range capabilityDefinitions {
-			if capabilityDefinition.Name == constants.ArchitectureName && len(capabilityDefinition.Values) == 1 {
-				return capabilityDefinition.Values[0]
-			}
-		}
-	}
-
-	// constants.ArchitectureName is a required capability and
-	// machineType.Capabilities[constants.ArchitectureName] can only
-	// be empty for cloudprofiles supporting exactly one architecture.
-	// we should never reach this point.
-	return ""
 }
 
 // MachineTypeStorage is the amount of storage associated with the root volume of this machine type.
@@ -394,18 +369,40 @@ func (t Capabilities) String() string {
 	return fmt.Sprintf("%v", map[string]CapabilityValues(t))
 }
 
-// CapabilitySet is a wrapper for Capabilities.
+// MachineImageFlavor is a wrapper for Capabilities.
 // This is a workaround as the Protobuf generator can't handle a slice of maps.
-type CapabilitySet struct {
+type MachineImageFlavor struct {
 	Capabilities `json:"-" protobuf:"bytes,1,rep,name=capabilities,casttype=Capabilities"`
 }
 
-// UnmarshalJSON unmarshals the given data to a CapabilitySet.
-func (c *CapabilitySet) UnmarshalJSON(data []byte) error {
+// UnmarshalJSON unmarshals the given data to a MachineImageFlavor.
+func (c *MachineImageFlavor) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &c.Capabilities)
 }
 
-// MarshalJSON marshals the CapabilitySet object to JSON.
-func (c *CapabilitySet) MarshalJSON() ([]byte, error) {
+// MarshalJSON marshals the MachineImageFlavor object to JSON.
+func (c *MachineImageFlavor) MarshalJSON() ([]byte, error) {
 	return json.Marshal(c.Capabilities)
+}
+
+// GetArchitecture returns the architecture of the machine type.
+func (m *MachineType) GetArchitecture(capabilityDefinitions []CapabilityDefinition) string {
+	capabilityArchitecture := GetCapabilitiesWithAppliedDefaults(m.Capabilities, capabilityDefinitions)[constants.ArchitectureName]
+	if len(capabilityArchitecture) == 1 {
+		return capabilityArchitecture[0]
+	}
+	return ptr.Deref(m.Architecture, "")
+}
+
+// GetCapabilitiesWithAppliedDefaults returns new capabilities with applied defaults from the capability definitions.
+func GetCapabilitiesWithAppliedDefaults(capabilities Capabilities, capabilityDefinitions []CapabilityDefinition) Capabilities {
+	result := make(Capabilities, len(capabilityDefinitions))
+	for _, capabilityDefinition := range capabilityDefinitions {
+		if values, ok := capabilities[capabilityDefinition.Name]; ok {
+			result[capabilityDefinition.Name] = values
+		} else {
+			result[capabilityDefinition.Name] = capabilityDefinition.Values
+		}
+	}
+	return result
 }

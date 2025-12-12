@@ -60,6 +60,20 @@ spec:
                 description: AdditionalLabels are labels that will be added to every
                   Greenhouse Cluster created by this CareInstruction.
                 type: object
+              authenticationConfigMapName:
+                description: |-
+                  AuthenticationConfigMapName is a reference to a ConfigMap in the Greenhouse cluster
+                  containing an AuthenticationConfiguration (config.yaml key with apiserver.config.k8s.io/v1beta1 content).
+                  When set, the shoot controller will merge this configuration with any existing configuration
+                  on the Garden cluster and configure the Shoot to use the merged authentication configuration.
+                  This allows specifying multiple OIDC issuers or having more control over the authentication setup.
+                type: string
+              enableRBAC:
+                default: true
+                description: EnableRBAC indicates whether the automatic configuration
+                  of RBAC roles and role bindings for the Greenhouse service account
+                  on the shoot cluster should is enabled. Defaulted to true.
+                type: boolean
               gardenClusterKubeConfigSecretName:
                 description: |-
                   GardenClusterKubeConfigSecretName is a reference to the secret containing the kubeconfig for the Garden cluster.

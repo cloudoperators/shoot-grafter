@@ -164,11 +164,16 @@ type ShootStatus struct {
 	// EncryptedResources is the list of resources in the Shoot which are currently encrypted.
 	// Secrets are encrypted by default and are not part of the list.
 	// See https://github.com/gardener/gardener/blob/master/docs/usage/security/etcd_encryption_config.md for more details.
+	//
+	// Deprecated: This field is deprecated and will be removed with release v1.138.
+	// This field will be removed in favor of `status.credentials.encryptionAtRest.resources`.
 	EncryptedResources []string
 	// Networking contains information about cluster networking such as CIDRs.
 	Networking *NetworkingStatus
 	// InPlaceUpdates contains information about in-place updates for the Shoot workers.
 	InPlaceUpdates *InPlaceUpdatesStatus
+	// ManualWorkerPoolRollout contains information about the worker pool rollout progress.
+	ManualWorkerPoolRollout *ManualWorkerPoolRollout
 }
 
 // LastMaintenance holds information about a maintenance operation on the Shoot.
@@ -215,16 +220,14 @@ type PendingWorkerUpdates struct {
 type ShootCredentials struct {
 	// Rotation contains information about the credential rotations.
 	Rotation *ShootCredentialsRotation
+	// EncryptionAtRest contains information about Shoot data encryption at rest.
+	EncryptionAtRest *EncryptionAtRest
 }
 
 // ShootCredentialsRotation contains information about the rotation of credentials.
 type ShootCredentialsRotation struct {
 	// CertificateAuthorities contains information about the certificate authority credential rotation.
 	CertificateAuthorities *CARotation
-	// Kubeconfig contains information about the kubeconfig credential rotation.
-	//
-	// Deprecated: This field is deprecated and will be removed in gardener v1.120
-	Kubeconfig *ShootKubeconfigRotation
 	// SSHKeypair contains information about the ssh-keypair credential rotation.
 	SSHKeypair *ShootSSHKeypairRotation
 	// Observability contains information about the observability credential rotation.
@@ -233,6 +236,14 @@ type ShootCredentialsRotation struct {
 	ServiceAccountKey *ServiceAccountKeyRotation
 	// ETCDEncryptionKey contains information about the ETCD encryption key credential rotation.
 	ETCDEncryptionKey *ETCDEncryptionKeyRotation
+}
+
+// EncryptionAtRest contains information about Shoot data encryption at rest.
+type EncryptionAtRest struct {
+	// Resources is the list of resources in the Shoot which are currently encrypted.
+	// Secrets are encrypted by default and are not part of the list.
+	// See https://github.com/gardener/gardener/blob/master/docs/usage/security/etcd_encryption_config.md for more details.
+	Resources []string
 }
 
 // CARotation contains information about the certificate authority credential rotation.
@@ -252,6 +263,12 @@ type CARotation struct {
 	LastCompletionTriggeredTime *metav1.Time
 	// PendingWorkersRollouts contains the name of a worker pool and the initiation time of their last rollout due to
 	// credentials rotation.
+	PendingWorkersRollouts []PendingWorkersRollout
+}
+
+// ManualWorkerPoolRollout contains information about the worker pool rollout progress that has been initiated via the gardener.cloud/operation=rollout-workers annotation.
+type ManualWorkerPoolRollout struct {
+	// PendingWorkersRollouts contains the names of the worker pools that are still pending rollout.
 	PendingWorkersRollouts []PendingWorkersRollout
 }
 
@@ -314,6 +331,14 @@ type ETCDEncryptionKeyRotation struct {
 	// LastCompletionTriggeredTime is the recent time when the ETCD encryption key credential rotation completion was
 	// triggered.
 	LastCompletionTriggeredTime *metav1.Time
+	// AutoCompleteAfterPrepared indicates whether the current ETCD encryption key rotation should be auto completed after the preparation phase has finished.
+	// Such rotation can be triggered by the `rotate-etcd-encryption-key` annotation.
+	// This field is needed while we support two types of key rotations: two-operation and single operation rotation.
+	//
+	// Deprecated: This field will be removed in a future release. The field will be no longer needed with
+	// the removal `rotate-etcd-encryption-key-start` & `rotate-etcd-encryption-key-complete` annotations.
+	// TODO(AleksandarSavchev): Remove this after support for Kubernetes v1.33 is dropped.
+	AutoCompleteAfterPrepared *bool
 }
 
 // CredentialsRotationPhase is a string alias.
@@ -337,12 +362,11 @@ const (
 	RotationCompleted CredentialsRotationPhase = "Completed"
 )
 
-// PendingWorkersRollout contains the name of a worker pool and the initiation time of their last rollout due to
-// credentials rotation.
+// PendingWorkersRollout contains the name of a worker pool and the initiation time of their last rollout.
 type PendingWorkersRollout struct {
 	// Name is the name of a worker pool.
 	Name string
-	// LastInitiationTime is the most recent time when the credential rotation was initiated.
+	// LastInitiationTime is the most recent time when the worker rollout was initiated.
 	LastInitiationTime *metav1.Time
 }
 
@@ -537,6 +561,12 @@ type ClusterAutoscaler struct {
 	Expander *ExpanderMode
 	// MaxNodeProvisionTime defines how long CA waits for node to be provisioned (default: 20 mins).
 	MaxNodeProvisionTime *metav1.Duration
+	// InitialNodeGroupBackoffDuration is the duration of first backoff after a new node failed to start (default: 5m).
+	InitialNodeGroupBackoffDuration *metav1.Duration
+	// MaxNodeGroupBackoffDuration is the maximum backoff duration for a NodeGroup after new nodes failed to start (default: 30m).
+	MaxNodeGroupBackoffDuration *metav1.Duration
+	// NodeGroupBackoffResetTimeout is the time after last failed scale-up when the backoff duration is reset (default: 3h).
+	NodeGroupBackoffResetTimeout *metav1.Duration
 	// MaxGracefulTerminationSeconds is the number of seconds CA waits for pod termination when trying to scale down a node (default: 600).
 	MaxGracefulTerminationSeconds *int32
 	// StartupTaints specifies a list of taint keys to ignore in node templates when considering to scale a node group.
@@ -546,7 +576,7 @@ type ClusterAutoscaler struct {
 	// Cluster Autoscaler internally treats nodes tainted with status taints as ready, but filtered out during scale up logic.
 	StatusTaints []string
 	// IgnoreTaints specifies a list of taint keys to ignore in node templates when considering to scale a node group.
-	// Ignore taints are deprecated as of K8S 1.29 and treated as startup taints.
+	// Ignore taints are deprecated and treated as startup taints.
 	IgnoreTaints []string
 	// NewPodScaleUpDelay specifies how long CA should ignore newly created pods before they have to be considered for scale-up.
 	NewPodScaleUpDelay *metav1.Duration
@@ -828,7 +858,7 @@ type OIDCConfig struct {
 	// ClientAuthentication can optionally contain client configuration used for kubeconfig generation.
 	//
 	// Deprecated: This field has no implemented use and will be forbidden starting from Kubernetes 1.31.
-	// It's use was planned for genereting OIDC kubeconfig https://github.com/gardener/gardener/issues/1433
+	// It's use was planned for generating OIDC kubeconfig https://github.com/gardener/gardener/issues/1433
 	// TODO(AleksandarSavchev): Drop this field after support for Kubernetes 1.30 is dropped.
 	ClientAuthentication *OpenIDConnectClientAuthentication
 	// The client ID for the OpenID Connect client, must be set.
@@ -1144,21 +1174,17 @@ type SwapBehavior string
 
 const (
 	// NoSwap is a constant for the kubelet's swap behavior restricting Kubernetes workloads to not use swap.
-	// Only available for Kubernetes versions >= v1.30.
 	NoSwap SwapBehavior = "NoSwap"
 	// LimitedSwap is a constant for the kubelet's swap behavior limiting the amount of swap usable for Kubernetes workloads. Workloads on the node not managed by Kubernetes can still swap.
 	// - cgroupsv1 host: Kubernetes workloads can use any combination of memory and swap, up to the pod's memory limit
 	// - cgroupsv2 host: swap is managed independently from memory. Kubernetes workloads cannot use swap memory.
 	LimitedSwap SwapBehavior = "LimitedSwap"
-	// UnlimitedSwap is a constant for the kubelet's swap behavior enabling Kubernetes workloads to use as much swap memory as required, up to the system limit (not limited by pod or container memory limits).
-	// Only available for Kubernetes versions < v1.30.
-	UnlimitedSwap SwapBehavior = "UnlimitedSwap"
 )
 
 // MemorySwapConfiguration contains kubelet swap configuration
 // For more information, please see KEP: 2400-node-swap
 type MemorySwapConfiguration struct {
-	// SwapBehavior configures swap memory available to container workloads. May be one of {"LimitedSwap", "UnlimitedSwap"}
+	// SwapBehavior configures swap memory available to container workloads. May be one of {"NoSwap", "LimitedSwap"}
 	// defaults to: LimitedSwap
 	SwapBehavior *SwapBehavior
 }
@@ -1315,7 +1341,7 @@ type Worker struct {
 	// UpdateStrategy specifies the machine update strategy for the worker pool.
 	UpdateStrategy *MachineUpdateStrategy
 	// ControlPlane specifies that the shoot cluster control plane components should be running in this worker pool.
-	// This is only relevant for autonomous shoot clusters.
+	// This is only relevant for self-hosted shoot clusters.
 	ControlPlane *WorkerControlPlane
 }
 

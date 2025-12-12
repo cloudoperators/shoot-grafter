@@ -199,7 +199,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// Check if the error is due to a conflict (concurrent update)
 		// In this case, just requeue without emitting an event
 		if apierrors.IsConflict(err) || strings.Contains(err.Error(), "the object has been modified") {
-			r.Info("Secret was modified concurrently, requeueing", "name", shoot.Name)
+			r.Info("Secret was modified concurrently, requeuing", "name", shoot.Name)
 			return ctrl.Result{Requeue: true}, nil
 		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
@@ -224,6 +224,31 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
+
+	// Configure OIDC authentication if AuthenticationConfigMapName is set
+	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
+	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
+		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
+			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
+				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
+			return ctrl.Result{}, err
+		}
+		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
+			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+	}
+
+	// Set up RBAC if enabled in the CareInstruction
+	if r.CareInstruction.Spec.EnableRBAC {
+		shootClient, err := getShootClusterClient(ctx, r.GardenClient, &shoot)
+		if err != nil {
+			r.Info("unable to get Shoot cluster client", "name", shoot.Name, "error", err)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ShootClientFetchFailed",
+				fmt.Sprintf("Failed to get Shoot cluster client for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
+			return ctrl.Result{}, err
+		}
+		r.setRBAC(ctx, shootClient, shoot.GetName())
+	}
 
 	return ctrl.Result{}, nil
 }

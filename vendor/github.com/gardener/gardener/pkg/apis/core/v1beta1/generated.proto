@@ -374,12 +374,6 @@ message CapabilityDefinition {
   optional CapabilityValues values = 2;
 }
 
-// CapabilitySet is a wrapper for Capabilities.
-// This is a workaround as the Protobuf generator can't handle a slice of maps.
-message CapabilitySet {
-  map<string, CapabilityValues> capabilities = 1;
-}
-
 // CapabilityValues contains capability values.
 // This is a workaround as the Protobuf generator can't handle a map with slice values.
 // +protobuf.nullable=true
@@ -475,12 +469,12 @@ message CloudProfileSpec {
   // +optional
   optional Limits limits = 11;
 
-  // Capabilities contains the definition of all possible capabilities in the CloudProfile.
+  // MachineCapabilities contains the definition of all possible capabilities in the CloudProfile.
   // Only capabilities and values defined here can be used to describe MachineImages and MachineTypes.
   // The order of values for a given capability is relevant. The most important value is listed first.
   // During maintenance upgrades, the image that matches most capabilities will be selected.
   // +optional
-  repeated CapabilityDefinition capabilities = 12;
+  repeated CapabilityDefinition machineCapabilities = 12;
 }
 
 // ClusterAutoscaler contains the configuration flags for the Kubernetes cluster autoscaler.
@@ -523,7 +517,7 @@ message ClusterAutoscaler {
   optional int32 maxGracefulTerminationSeconds = 9;
 
   // IgnoreTaints specifies a list of taint keys to ignore in node templates when considering to scale a node group.
-  // Deprecated: Ignore taints are deprecated as of K8S 1.29 and treated as startup taints
+  // Deprecated: Ignore taints are deprecated and treated as startup taints
   // +optional
   repeated string ignoreTaints = 10;
 
@@ -566,6 +560,18 @@ message ClusterAutoscaler {
   // Default: 1
   // +optional
   optional int32 maxDrainParallelism = 18;
+
+  // InitialNodeGroupBackoffDuration is the duration of first backoff after a new node failed to start (default: 5m).
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration initialNodeGroupBackoffDuration = 19;
+
+  // MaxNodeGroupBackoffDuration is the maximum backoff duration for a NodeGroup after new nodes failed to start (default: 30m).
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration maxNodeGroupBackoffDuration = 20;
+
+  // NodeGroupBackoffResetTimeout is the time after last failed scale-up when the backoff duration is reset (default: 3h).
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration nodeGroupBackoffResetTimeout = 21;
 }
 
 // ClusterAutoscalerOptions contains the cluster autoscaler configurations for a worker pool.
@@ -995,6 +1001,25 @@ message ETCDEncryptionKeyRotation {
   // triggered.
   // +optional
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastCompletionTriggeredTime = 5;
+
+  // AutoCompleteAfterPrepared indicates whether the current ETCD encryption key rotation should be auto completed after the preparation phase has finished.
+  // Such rotation can be triggered by the `rotate-etcd-encryption-key` annotation.
+  // This field is needed while we support two types of key rotations: two-operation and single operation rotation.
+  //
+  // Deprecated: This field will be removed in a future release. The field will be no longer needed with
+  // the removal `rotate-etcd-encryption-key-start` & `rotate-etcd-encryption-key-complete` annotations.
+  // TODO(AleksandarSavchev): Remove this after support for Kubernetes v1.33 is dropped.
+  // +optional
+  optional bool autoCompleteAfterPrepared = 6;
+}
+
+// EncryptionAtRest contains information about Shoot data encryption at rest.
+message EncryptionAtRest {
+  // Resources is the list of resources in the Shoot which are currently encrypted.
+  // Secrets are encrypted by default and are not part of the list.
+  // See https://github.com/gardener/gardener/blob/master/docs/usage/security/etcd_encryption_config.md for more details.
+  // +optional
+  repeated string resources = 1;
 }
 
 // EncryptionConfig contains customizable encryption configuration of the API server.
@@ -1389,12 +1414,10 @@ message KubeAPIServerConfig {
   optional EncryptionConfig encryptionConfig = 16;
 
   // StructuredAuthentication contains configuration settings for structured authentication for the kube-apiserver.
-  // This field is only available for Kubernetes v1.30 or later.
   // +optional
   optional StructuredAuthentication structuredAuthentication = 17;
 
   // StructuredAuthorization contains configuration settings for structured authorization for the kube-apiserver.
-  // This field is only available for Kubernetes v1.30 or later.
   // +optional
   optional StructuredAuthorization structuredAuthorization = 18;
 
@@ -1918,6 +1941,12 @@ message MachineImage {
   optional string updateStrategy = 3;
 }
 
+// MachineImageFlavor is a wrapper for Capabilities.
+// This is a workaround as the Protobuf generator can't handle a slice of maps.
+message MachineImageFlavor {
+  map<string, CapabilityValues> capabilities = 1;
+}
+
 // MachineImageVersion is an expirable version with list of supported container runtimes and interfaces
 message MachineImageVersion {
   optional ExpirableVersion expirableVersion = 1;
@@ -1942,10 +1971,10 @@ message MachineImageVersion {
   // +optional
   optional InPlaceUpdates inPlaceUpdates = 5;
 
-  // CapabilitySets is an array of capability sets. Each entry represents a combination of capabilities that is provided by
+  // CapabilityFlavors is an array of MachineImageFlavor. Each entry represents a combination of capabilities that is provided by
   // the machine image version.
   // +optional
-  repeated CapabilitySet capabilitySets = 6;
+  repeated MachineImageFlavor capabilityFlavors = 6;
 }
 
 // MachineType contains certain properties of a machine type.
@@ -2040,10 +2069,17 @@ message MaintenanceTimeWindow {
   optional string end = 2;
 }
 
+// ManualWorkerPoolRollout contains information about the worker pool rollout progress that has been initiated via the gardener.cloud/operation=rollout-workers annotation.
+message ManualWorkerPoolRollout {
+  // PendingWorkersRollouts contains the names of the worker pools that are still pending rollout.
+  // +optional
+  repeated PendingWorkersRollout pendingWorkersRollouts = 1;
+}
+
 // MemorySwapConfiguration contains kubelet swap configuration
 // For more information, please see KEP: 2400-node-swap
 message MemorySwapConfiguration {
-  // SwapBehavior configures swap memory available to container workloads. May be one of {"LimitedSwap", "UnlimitedSwap"}
+  // SwapBehavior configures swap memory available to container workloads. May be one of {"NoSwap", "LimitedSwap"}
   // defaults to: LimitedSwap
   // +optional
   optional string swapBehavior = 1;
@@ -2264,7 +2300,7 @@ message OIDCConfig {
   // ClientAuthentication can optionally contain client configuration used for kubeconfig generation.
   //
   // Deprecated: This field has no implemented use and will be forbidden starting from Kubernetes 1.31.
-  // It's use was planned for genereting OIDC kubeconfig https://github.com/gardener/gardener/issues/1433
+  // It's use was planned for generating OIDC kubeconfig https://github.com/gardener/gardener/issues/1433
   // TODO(AleksandarSavchev): Drop this field after support for Kubernetes 1.30 is dropped.
   // +optional
   optional OpenIDConnectClientAuthentication clientAuthentication = 2;
@@ -2336,13 +2372,12 @@ message PendingWorkerUpdates {
   repeated string manualInPlaceUpdate = 2;
 }
 
-// PendingWorkersRollout contains the name of a worker pool and the initiation time of their last rollout due to
-// credentials rotation.
+// PendingWorkersRollout contains the name of a worker pool and the initiation time of their last rollout.
 message PendingWorkersRollout {
   // Name is the name of a worker pool.
   optional string name = 1;
 
-  // LastInitiationTime is the most recent time when the credential rotation was initiated.
+  // LastInitiationTime is the most recent time when the worker rollout was initiated.
   // +optional
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastInitiationTime = 2;
 }
@@ -2397,6 +2432,7 @@ message ProjectSpec {
   optional .k8s.io.api.rbac.v1.Subject createdBy = 1;
 
   // Description is a human-readable description of what the project is used for.
+  // Only letters, digits and certain punctuation characters are allowed for this field.
   // +optional
   optional string description = 2;
 
@@ -2410,6 +2446,7 @@ message ProjectSpec {
   optional .k8s.io.api.rbac.v1.Subject owner = 3;
 
   // Purpose is a human-readable explanation of the project's purpose.
+  // Only letters, digits and certain punctuation characters are allowed for this field.
   // +optional
   optional string purpose = 4;
 
@@ -2653,6 +2690,11 @@ message SeedDNS {
   // Internal configures DNS settings related to seed internal domain.
   // +optional
   optional SeedDNSProviderConfig internal = 3;
+
+  // Defaults configures DNS settings related to seed default domains.
+  // When determining the DNS settings for a Shoot, the first matching entry in this list will take precedence.
+  // +optional
+  repeated SeedDNSProviderConfig defaults = 4;
 }
 
 // SeedDNSProvider configures a DNSProvider for Seeds
@@ -2822,6 +2864,26 @@ message SeedSettingLoadBalancerServices {
   // Defaults to nil, which is equivalent to not allowing ProxyProtocol.
   // +optional
   optional LoadBalancerServicesProxyProtocol proxyProtocol = 4;
+
+  // ZonalIngress controls whether ingress gateways are deployed per availability zone.
+  // Defaults to true.
+  // +optional
+  optional SeedSettingLoadBalancerServicesZonalIngress zonalIngress = 5;
+
+  // Class configures the Service.spec.loadBalancerClass field for the load balancer services on the seed.
+  // Note that changing the loadBalancerClass of existing LoadBalancer services is denied by Kubernetes.
+  // +optional
+  optional string class = 6;
+}
+
+// SeedSettingLoadBalancerServicesZonalIngress controls the deployment of ingress gateways per availability zone.
+message SeedSettingLoadBalancerServicesZonalIngress {
+  // Enabled controls whether seed ingress gateways are deployed in each availability zone.
+  // Defaults to true, which provisions an ingress gateway load balancer for each availability zone.
+  // When disabled, only a single ingress gateway is deployed.
+  // See https://github.com/gardener/gardener/blob/master/docs/operations/seed_settings.md#zonal-ingress.
+  // +optional
+  optional bool enabled = 1;
 }
 
 // SeedSettingLoadBalancerServicesZones controls settings, which are specific to the single-zone load balancers in a
@@ -3132,6 +3194,10 @@ message ShootCredentials {
   // Rotation contains information about the credential rotations.
   // +optional
   optional ShootCredentialsRotation rotation = 1;
+
+  // EncryptionAtRest contains information about Shoot data encryption at rest.
+  // +optional
+  optional EncryptionAtRest encryptionAtRest = 2;
 }
 
 // ShootCredentialsRotation contains information about the rotation of credentials.
@@ -3139,12 +3205,6 @@ message ShootCredentialsRotation {
   // CertificateAuthorities contains information about the certificate authority credential rotation.
   // +optional
   optional CARotation certificateAuthorities = 1;
-
-  // Kubeconfig contains information about the kubeconfig credential rotation.
-  // +optional
-  //
-  // Deprecated: This field is deprecated and will be removed in gardener v1.120
-  optional ShootKubeconfigRotation kubeconfig = 2;
 
   // SSHKeypair contains information about the ssh-keypair credential rotation.
   // +optional
@@ -3454,6 +3514,9 @@ message ShootStatus {
   // EncryptedResources is the list of resources in the Shoot which are currently encrypted.
   // Secrets are encrypted by default and are not part of the list.
   // See https://github.com/gardener/gardener/blob/master/docs/usage/security/etcd_encryption_config.md for more details.
+  //
+  // Deprecated: This field is deprecated and will be removed with release v1.138.
+  // This field will be removed in favor of `status.credentials.encryptionAtRest.resources`.
   // +optional
   repeated string encryptedResources = 18;
 
@@ -3464,6 +3527,10 @@ message ShootStatus {
   // InPlaceUpdates contains information about in-place updates for the Shoot workers.
   // +optional
   optional InPlaceUpdatesStatus inPlaceUpdates = 20;
+
+  // ManualWorkerPoolRollout contains information about the worker pool rollout progress.
+  // +optional
+  optional ManualWorkerPoolRollout manualWorkerPoolRollout = 21;
 }
 
 // ShootTemplate is a template for creating a Shoot object.
@@ -3770,7 +3837,7 @@ message Worker {
   optional string updateStrategy = 23;
 
   // ControlPlane specifies that the shoot cluster control plane components should be running in this worker pool.
-  // This is only relevant for autonomous shoot clusters.
+  // This is only relevant for self-hosted shoot clusters.
   // +optional
   optional WorkerControlPlane controlPlane = 24;
 }

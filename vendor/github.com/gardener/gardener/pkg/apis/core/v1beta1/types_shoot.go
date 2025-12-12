@@ -214,6 +214,9 @@ type ShootStatus struct {
 	// EncryptedResources is the list of resources in the Shoot which are currently encrypted.
 	// Secrets are encrypted by default and are not part of the list.
 	// See https://github.com/gardener/gardener/blob/master/docs/usage/security/etcd_encryption_config.md for more details.
+	//
+	// Deprecated: This field is deprecated and will be removed with release v1.138.
+	// This field will be removed in favor of `status.credentials.encryptionAtRest.resources`.
 	// +optional
 	EncryptedResources []string `json:"encryptedResources,omitempty" protobuf:"bytes,18,rep,name=encryptedResources"`
 	// Networking contains information about cluster networking such as CIDRs.
@@ -222,6 +225,9 @@ type ShootStatus struct {
 	// InPlaceUpdates contains information about in-place updates for the Shoot workers.
 	// +optional
 	InPlaceUpdates *InPlaceUpdatesStatus `json:"inPlaceUpdates,omitempty" protobuf:"bytes,20,opt,name=inPlaceUpdates"`
+	// ManualWorkerPoolRollout contains information about the worker pool rollout progress.
+	// +optional
+	ManualWorkerPoolRollout *ManualWorkerPoolRollout `json:"manualWorkerPoolRollout,omitempty" protobuf:"bytes,21,opt,name=manualWorkerPoolRollout"`
 }
 
 // LastMaintenance holds information about a maintenance operation on the Shoot.
@@ -277,6 +283,9 @@ type ShootCredentials struct {
 	// Rotation contains information about the credential rotations.
 	// +optional
 	Rotation *ShootCredentialsRotation `json:"rotation,omitempty" protobuf:"bytes,1,opt,name=rotation"`
+	// EncryptionAtRest contains information about Shoot data encryption at rest.
+	// +optional
+	EncryptionAtRest *EncryptionAtRest `json:"encryptionAtRest,omitempty" protobuf:"bytes,2,opt,name=encryptionAtRest"`
 }
 
 // ShootCredentialsRotation contains information about the rotation of credentials.
@@ -284,11 +293,10 @@ type ShootCredentialsRotation struct {
 	// CertificateAuthorities contains information about the certificate authority credential rotation.
 	// +optional
 	CertificateAuthorities *CARotation `json:"certificateAuthorities,omitempty" protobuf:"bytes,1,opt,name=certificateAuthorities"`
-	// Kubeconfig contains information about the kubeconfig credential rotation.
-	// +optional
-	//
-	// Deprecated: This field is deprecated and will be removed in gardener v1.120
-	Kubeconfig *ShootKubeconfigRotation `json:"kubeconfig,omitempty" protobuf:"bytes,2,opt,name=kubeconfig"`
+
+	// Kubeconfig is tombstoned to show why 2 is reserved protobuf tag.
+	// Kubeconfig *ShootKubeconfigRotation `json:"kubeconfig,omitempty" protobuf:"bytes,2,opt,name=kubeconfig"`
+
 	// SSHKeypair contains information about the ssh-keypair credential rotation.
 	// +optional
 	SSHKeypair *ShootSSHKeypairRotation `json:"sshKeypair,omitempty" protobuf:"bytes,3,opt,name=sshKeypair"`
@@ -301,6 +309,15 @@ type ShootCredentialsRotation struct {
 	// ETCDEncryptionKey contains information about the ETCD encryption key credential rotation.
 	// +optional
 	ETCDEncryptionKey *ETCDEncryptionKeyRotation `json:"etcdEncryptionKey,omitempty" protobuf:"bytes,6,opt,name=etcdEncryptionKey"`
+}
+
+// EncryptionAtRest contains information about Shoot data encryption at rest.
+type EncryptionAtRest struct {
+	// Resources is the list of resources in the Shoot which are currently encrypted.
+	// Secrets are encrypted by default and are not part of the list.
+	// See https://github.com/gardener/gardener/blob/master/docs/usage/security/etcd_encryption_config.md for more details.
+	// +optional
+	Resources []string `json:"resources,omitempty" protobuf:"bytes,1,rep,name=resources"`
 }
 
 // CARotation contains information about the certificate authority credential rotation.
@@ -326,6 +343,13 @@ type CARotation struct {
 	// credentials rotation.
 	// +optional
 	PendingWorkersRollouts []PendingWorkersRollout `json:"pendingWorkersRollouts,omitempty" protobuf:"bytes,6,rep,name=pendingWorkersRollouts"`
+}
+
+// ManualWorkerPoolRollout contains information about the worker pool rollout progress that has been initiated via the gardener.cloud/operation=rollout-workers annotation.
+type ManualWorkerPoolRollout struct {
+	// PendingWorkersRollouts contains the names of the worker pools that are still pending rollout.
+	// +optional
+	PendingWorkersRollouts []PendingWorkersRollout `json:"pendingWorkersRollouts,omitempty" protobuf:"bytes,1,rep,name=pendingWorkersRollouts"`
 }
 
 // ShootKubeconfigRotation contains information about the kubeconfig credential rotation.
@@ -402,6 +426,15 @@ type ETCDEncryptionKeyRotation struct {
 	// triggered.
 	// +optional
 	LastCompletionTriggeredTime *metav1.Time `json:"lastCompletionTriggeredTime,omitempty" protobuf:"bytes,5,opt,name=lastCompletionTriggeredTime"`
+	// AutoCompleteAfterPrepared indicates whether the current ETCD encryption key rotation should be auto completed after the preparation phase has finished.
+	// Such rotation can be triggered by the `rotate-etcd-encryption-key` annotation.
+	// This field is needed while we support two types of key rotations: two-operation and single operation rotation.
+	//
+	// Deprecated: This field will be removed in a future release. The field will be no longer needed with
+	// the removal `rotate-etcd-encryption-key-start` & `rotate-etcd-encryption-key-complete` annotations.
+	// TODO(AleksandarSavchev): Remove this after support for Kubernetes v1.33 is dropped.
+	// +optional
+	AutoCompleteAfterPrepared *bool `json:"autoCompleteAfterPrepared,omitempty" protobuf:"varint,6,opt,name=autoCompleteAfterPrepared"`
 }
 
 // CredentialsRotationPhase is a string alias.
@@ -425,12 +458,11 @@ const (
 	RotationCompleted CredentialsRotationPhase = "Completed"
 )
 
-// PendingWorkersRollout contains the name of a worker pool and the initiation time of their last rollout due to
-// credentials rotation.
+// PendingWorkersRollout contains the name of a worker pool and the initiation time of their last rollout.
 type PendingWorkersRollout struct {
 	// Name is the name of a worker pool.
 	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
-	// LastInitiationTime is the most recent time when the credential rotation was initiated.
+	// LastInitiationTime is the most recent time when the worker rollout was initiated.
 	// +optional
 	LastInitiationTime *metav1.Time `json:"lastInitiationTime,omitempty" protobuf:"bytes,2,opt,name=lastInitiationTime"`
 }
@@ -680,7 +712,7 @@ type ClusterAutoscaler struct {
 	// +optional
 	MaxGracefulTerminationSeconds *int32 `json:"maxGracefulTerminationSeconds,omitempty" protobuf:"varint,9,opt,name=maxGracefulTerminationSeconds"`
 	// IgnoreTaints specifies a list of taint keys to ignore in node templates when considering to scale a node group.
-	// Deprecated: Ignore taints are deprecated as of K8S 1.29 and treated as startup taints
+	// Deprecated: Ignore taints are deprecated and treated as startup taints
 	// +optional
 	IgnoreTaints []string `json:"ignoreTaints,omitempty" protobuf:"bytes,10,opt,name=ignoreTaints"`
 
@@ -717,6 +749,15 @@ type ClusterAutoscaler struct {
 	// Default: 1
 	// +optional
 	MaxDrainParallelism *int32 `json:"maxDrainParallelism,omitempty" protobuf:"varint,18,opt,name=maxDrainParallelism"`
+	// InitialNodeGroupBackoffDuration is the duration of first backoff after a new node failed to start (default: 5m).
+	// +optional
+	InitialNodeGroupBackoffDuration *metav1.Duration `json:"initialNodeGroupBackoffDuration,omitempty" protobuf:"bytes,19,opt,name=initialNodeGroupBackoffDuration"`
+	// MaxNodeGroupBackoffDuration is the maximum backoff duration for a NodeGroup after new nodes failed to start (default: 30m).
+	// +optional
+	MaxNodeGroupBackoffDuration *metav1.Duration `json:"maxNodeGroupBackoffDuration,omitempty" protobuf:"bytes,20,opt,name=maxNodeGroupBackoffDuration"`
+	// NodeGroupBackoffResetTimeout is the time after last failed scale-up when the backoff duration is reset (default: 3h).
+	// +optional
+	NodeGroupBackoffResetTimeout *metav1.Duration `json:"nodeGroupBackoffResetTimeout,omitempty" protobuf:"bytes,21,opt,name=nodeGroupBackoffResetTimeout"`
 }
 
 // ExpanderMode is type used for Expander values
@@ -957,11 +998,9 @@ type KubeAPIServerConfig struct {
 	// +optional
 	EncryptionConfig *EncryptionConfig `json:"encryptionConfig,omitempty" protobuf:"bytes,16,opt,name=encryptionConfig"`
 	// StructuredAuthentication contains configuration settings for structured authentication for the kube-apiserver.
-	// This field is only available for Kubernetes v1.30 or later.
 	// +optional
 	StructuredAuthentication *StructuredAuthentication `json:"structuredAuthentication,omitempty" protobuf:"bytes,17,opt,name=structuredAuthentication"`
 	// StructuredAuthorization contains configuration settings for structured authorization for the kube-apiserver.
-	// This field is only available for Kubernetes v1.30 or later.
 	// +optional
 	StructuredAuthorization *StructuredAuthorization `json:"structuredAuthorization,omitempty" protobuf:"bytes,18,opt,name=structuredAuthorization"`
 	// Autoscaling contains auto-scaling configuration options for the kube-apiserver.
@@ -1087,7 +1126,7 @@ type OIDCConfig struct {
 	// ClientAuthentication can optionally contain client configuration used for kubeconfig generation.
 	//
 	// Deprecated: This field has no implemented use and will be forbidden starting from Kubernetes 1.31.
-	// It's use was planned for genereting OIDC kubeconfig https://github.com/gardener/gardener/issues/1433
+	// It's use was planned for generating OIDC kubeconfig https://github.com/gardener/gardener/issues/1433
 	// TODO(AleksandarSavchev): Drop this field after support for Kubernetes 1.30 is dropped.
 	// +optional
 	ClientAuthentication *OpenIDConnectClientAuthentication `json:"clientAuthentication,omitempty" protobuf:"bytes,2,opt,name=clientAuthentication"`
@@ -1504,21 +1543,17 @@ type SwapBehavior string
 
 const (
 	// NoSwap is a constant for the kubelet's swap behavior restricting Kubernetes workloads to not use swap.
-	// Only available for Kubernetes versions >= v1.30.
 	NoSwap SwapBehavior = "NoSwap"
 	// LimitedSwap is a constant for the kubelet's swap behavior limiting the amount of swap usable for Kubernetes workloads. Workloads on the node not managed by Kubernetes can still swap.
 	// - cgroupsv1 host: Kubernetes workloads can use any combination of memory and swap, up to the pod's memory limit
 	// - cgroupsv2 host: swap is managed independently from memory. Kubernetes workloads cannot use swap memory.
 	LimitedSwap SwapBehavior = "LimitedSwap"
-	// UnlimitedSwap is a constant for the kubelet's swap behavior enabling Kubernetes workloads to use as much swap memory as required, up to the system limit (not limited by pod or container memory limits).
-	// Only available for Kubernetes versions < v1.30.
-	UnlimitedSwap SwapBehavior = "UnlimitedSwap"
 )
 
 // MemorySwapConfiguration contains kubelet swap configuration
 // For more information, please see KEP: 2400-node-swap
 type MemorySwapConfiguration struct {
-	// SwapBehavior configures swap memory available to container workloads. May be one of {"LimitedSwap", "UnlimitedSwap"}
+	// SwapBehavior configures swap memory available to container workloads. May be one of {"NoSwap", "LimitedSwap"}
 	// defaults to: LimitedSwap
 	// +optional
 	SwapBehavior *SwapBehavior `json:"swapBehavior,omitempty" protobuf:"bytes,1,opt,name=swapBehavior"`
@@ -1717,7 +1752,7 @@ type Worker struct {
 	// +optional
 	UpdateStrategy *MachineUpdateStrategy `json:"updateStrategy,omitempty" protobuf:"bytes,23,opt,name=updateStrategy,casttype=MachineUpdateStrategy"`
 	// ControlPlane specifies that the shoot cluster control plane components should be running in this worker pool.
-	// This is only relevant for autonomous shoot clusters.
+	// This is only relevant for self-hosted shoot clusters.
 	// +optional
 	ControlPlane *WorkerControlPlane `json:"controlPlane,omitempty" protobuf:"bytes,24,opt,name=controlPlane"`
 }
@@ -2030,6 +2065,8 @@ const (
 	ShootDualStackNodesMigrationReady ConditionType = "DualStackNodesMigrationReady"
 	// ShootDNSServiceMigrationReady is a constant for a condition type indicating whether the kube-dns service is migrated.
 	ShootDNSServiceMigrationReady ConditionType = "DNSServiceMigrationReady"
+	// ShootUsesUnifiedHTTPProxyPort is a constant for a condition type indicating whether the new http-proxy port is consumed from istio.
+	ShootUsesUnifiedHTTPProxyPort ConditionType = "UsesUnifiedHTTPProxyPort"
 )
 
 // ShootPurpose is a type alias for string.

@@ -130,6 +130,9 @@ const (
 	// DeploymentNameVPNSeedServer is a constant for the name of a Kubernetes deployment object that contains
 	// the vpn-seed-server pod.
 	DeploymentNameVPNSeedServer = "vpn-seed-server"
+	// StatefulSetNameVPNSeedServer is a constant for the name of a Kubernetes statefulset object that contains
+	// the vpn-seed-server pods.
+	StatefulSetNameVPNSeedServer = DeploymentNameVPNSeedServer
 
 	// DeploymentNameKubeScheduler is a constant for the name of a Kubernetes deployment object that contains
 	// the kube-scheduler pod.
@@ -206,6 +209,8 @@ const (
 	GardenCreatedBy = "gardener.cloud/created-by"
 	// GardenerOperation is a constant for an annotation on a resource that describes a desired operation.
 	GardenerOperation = "gardener.cloud/operation"
+	// GardenerOperationsSeparator is the separator used to separate parallel operations in the GardenerOperation annotation.
+	GardenerOperationsSeparator = ";"
 	// GardenerMaintenanceOperation is a constant for an annotation on a Shoot that describes a desired operation which
 	// will be performed during maintenance.
 	GardenerMaintenanceOperation = "maintenance.gardener.cloud/operation"
@@ -319,6 +324,8 @@ const (
 	// ShootDisableIstioTLSTermination is a constant for an annotation on a Shoot stating that the Istio TLS termination
 	// for its kube-apiserver shall be disabled.
 	ShootDisableIstioTLSTermination = "shoot.gardener.cloud/disable-istio-tls-termination"
+	// ShootIsSelfHosted is a constant for a label on a Shoot indicating that it is self-hosted.
+	ShootIsSelfHosted = "shoot.gardener.cloud/self-hosted"
 
 	// ShootAlphaControlPlaneScaleDownDisabled is a constant for an annotation on the Shoot resource stating that the
 	// automatic scale-down shall be disabled for the etcd, kube-apiserver, kube-controller-manager.
@@ -410,16 +417,28 @@ const (
 	// OperationRotateServiceAccountKeyComplete is a constant for an annotation on a Shoot indicating that the
 	// rotation of the service account signing key shall be completed.
 	OperationRotateServiceAccountKeyComplete = "rotate-serviceaccount-key-complete"
+	// OperationRotateETCDEncryptionKey is a constant for an annotation on a Shoot indicating that the
+	// rotation of the ETCD encryption key shall be performed.
+	OperationRotateETCDEncryptionKey = "rotate-etcd-encryption-key"
 	// OperationRotateETCDEncryptionKeyStart is a constant for an annotation on a Shoot indicating that the
 	// rotation of the ETCD encryption key shall be started.
+	//
+	// Deprecated: This annotation is deprecated in favour of `rotate-etcd-encryption-key`, which does a full rotation.
+	// TODO(AleksandarSavchev): Remove this after support for Kubernetes v1.33 is dropped.
 	OperationRotateETCDEncryptionKeyStart = "rotate-etcd-encryption-key-start"
 	// OperationRotateETCDEncryptionKeyComplete is a constant for an annotation on a Shoot indicating that the
 	// rotation of the ETCD encryption key shall be completed.
+	//
+	// Deprecated: This annotation is deprecated in favour of `rotate-etcd-encryption-key`, which does a full rotation.
+	// TODO(AleksandarSavchev): Remove this after support for Kubernetes v1.33 is dropped.
 	OperationRotateETCDEncryptionKeyComplete = "rotate-etcd-encryption-key-complete"
 	// OperationRotateRolloutWorkers is a constant for an annotation triggering the rollout of one or more worker pools
 	// (comma-separated) when the certificate authorities or service account signing key credentials rotation is in
 	// WaitingForWorkersRollout phase.
 	OperationRotateRolloutWorkers = "rotate-rollout-workers"
+	// OperationRolloutWorkers is a constant for an annotation triggering the rollout of one or more worker pools
+	// (comma-separated).
+	OperationRolloutWorkers = "rollout-workers"
 	// SeedOperationRenewGardenAccessSecrets is a constant for an annotation on a Seed indicating that
 	// all garden access secrets on the seed shall be renewed.
 	SeedOperationRenewGardenAccessSecrets = "renew-garden-access-secrets" // #nosec G101 -- No credential.
@@ -475,8 +494,8 @@ const (
 	// LabelKeyAggregateToProjectMember is a constant for a label on ClusterRoles that are aggregated to the project
 	// member ClusterRole.
 	LabelKeyAggregateToProjectMember = "rbac.gardener.cloud/aggregate-to-project-member"
-	// LabelAutonomousShootCluster is a constant for a label on a Seed indicating that it is an autonomous shoot cluster.
-	LabelAutonomousShootCluster = "seed.gardener.cloud/autonomous-shoot-cluster"
+	// LabelSelfHostedShootCluster is a constant for a label on a Seed indicating that it is a self-hosted shoot cluster.
+	LabelSelfHostedShootCluster = "seed.gardener.cloud/self-hosted-shoot-cluster"
 	// LabelSecretBindingReference is used to identify secrets which are referred by a SecretBinding (not necessarily in the same namespace).
 	LabelSecretBindingReference = "reference.gardener.cloud/secretbinding"
 	// LabelCredentialsBindingReference is used to identify credentials which are referred by a CredentialsBinding (not necessarily in the same namespace).
@@ -799,8 +818,17 @@ const (
 
 	// SeedsGroup is the identity group for gardenlets when authenticating to the API server.
 	SeedsGroup = "gardener.cloud:system:seeds"
-	// SeedUserNamePrefix is the identity user name prefix for gardenlets when authenticating to the API server.
+	// SeedUserNamePrefix is the identity username prefix for gardenlets when authenticating to the API server.
 	SeedUserNamePrefix = "gardener.cloud:system:seed:"
+	// ShootsGroup is the identity group for gardenlets running in self-hosted shoot clusters when authenticating to the
+	// API server.
+	ShootsGroup = "gardener.cloud:system:shoots"
+	// ShootUserNamePrefix is the identity username prefix for gardenlets running in self-hosted shoot clusters when
+	// authenticating to the API server.
+	ShootUserNamePrefix = "gardener.cloud:system:shoot:"
+	// GardenadmUserNamePrefix is the identity username prefix for `gardenadm connect` when it bootstraps the
+	// gardenlet.
+	GardenadmUserNamePrefix = "gardener.cloud:gardenadm:shoot:"
 
 	// ClusterRoleNameGardenerAdministrators is the name of a cluster role in the garden cluster defining privileges
 	// for administrators.
@@ -1046,4 +1074,11 @@ const (
 	// GardenerInfoConfigMapDataKeyGardenerAPIServer is the data key in the gardener-info ConfigMap that contains
 	// information about gardener-apiserver.
 	GardenerInfoConfigMapDataKeyGardenerAPIServer = "gardenerAPIServer"
+
+	// LabelShootEndpointPrefix is the prefix used for labels related to
+	// advertised shoot endpoints.
+	LabelShootEndpointPrefix = "endpoint.shoot.gardener.cloud/"
+	// LabelShootEndpointAdvertise is the name of the label which controls
+	// whether an endpoint is advertised for a shoot.
+	LabelShootEndpointAdvertise = LabelShootEndpointPrefix + "advertise"
 )
