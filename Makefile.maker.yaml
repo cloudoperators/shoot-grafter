@@ -43,3 +43,6 @@ renovate:
 
 reuse:
   enabled: false
+
+license:
+  addHeaders: false
