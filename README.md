@@ -26,6 +26,8 @@ shoot-grafter currently only creates clusters matching Shoots but does not autom
 
 ## Architecture
 
+![shoot grafter architecture diagramm](./shoot-grafter-arch.png "Shoot Grafter Architecture")
+
 The operator consists of two main controllers:
 
 ### CareInstruction Controller
