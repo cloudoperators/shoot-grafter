@@ -22,7 +22,7 @@ shoot-grafter continuously monitors Garden clusters for Shoots matching specific
 6. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
 7. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
 
-shoot-grafter currently only creates clusters matching Shoots but does not automatically clean up clusters when Shoot labels change or Shoots are deleted. Manual cleanup of Greenhouse Cluster resources is required in these scenarios.
+shoot-grafter currently only creates Clusters matching Shoots but does not automatically clean up Clusters when Shoot labels change or Shoots are deleted. Manual cleanup of Greenhouse Cluster resources is required in these scenarios.
 
 ## Architecture
 
@@ -87,6 +87,13 @@ spec:
       team: platform
       shoot.gardener.cloud/status: "healthy"
   
+  # Condition selectors to filter Shoots (optional, all must match)
+  shootConditionSelectors:
+    - type: "APIServerAvailable"
+      status: "True"
+    - type: "ControlPlaneHealthy"
+      status: "True"
+  
   # Labels to propagate from Shoot to Greenhouse Cluster
   propagateLabels:
     - region
@@ -107,16 +114,17 @@ spec:
 
 ### CareInstruction Spec Fields
 
-| Field | Type | Required | Description |‚
+| Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `gardenClusterName` | string | No*| Name of the Greenhouse Cluster resource representing the Garden cluster |
+| `gardenClusterName` | string | No* | Name of the Greenhouse Cluster resource representing the Garden cluster |
 | `gardenClusterKubeConfigSecretName` | SecretKeyReference | No* | Reference to a secret containing the kubeconfig for the Garden cluster |
 | `gardenNamespace` | string | Yes | Namespace in the Garden cluster where Shoots are located |
-| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). It is recommended to always use `shoot.gardener.cloud/status: "healthy"` to only onboard healthy Shoots. |
+| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). |
+| `shootConditionSelectors` | []ShootConditionSelector | No | Condition selectors to filter Shoots based on their status conditions (e.g., APIServerAvailable=True). All conditions must match (AND logic). |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
-| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)|
-| `enableRBAC` | bool | No | When false, skips automatic RBAC setup on Shoot clusters (default: true‚) |
+| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster) |
+| `enableRBAC` | bool | No | When false, skips automatic RBAC setup on Shoot clusters (default: true) |
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
 
@@ -237,7 +245,34 @@ spec:
     onboarding-method: shoot-grafter
 ```
 
-### Example 4: Configuring OIDC Authentication
+### Example 4: Filter Shoots by Status Conditions
+
+Onboard only Shoots with specific status conditions (all conditions must match):
+
+```yaml
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
+kind: CareInstruction
+metadata:
+  name: healthy-shoots-only
+  namespace: greenhouse-prod
+spec:
+  gardenClusterName: prod-garden
+  gardenNamespace: garden--production
+  shootSelector:
+    matchLabels:
+      environment: production
+  shootConditionSelectors:
+    - type: "APIServerAvailable"
+      status: "True"
+    - type: "ControlPlaneHealthy"
+      status: "True"
+  propagateLabels:
+    - region
+```
+
+See [Gardener Shoot Conditions documentation](https://gardener.cloud/docs/gardener/concepts/gardenlet/#conditions) for available condition types.
+
+### Example 5: Configuring OIDC Authentication
 
 This example shows how to configure OIDC authentication on Shoots to enable Greenhouse authentication:
 

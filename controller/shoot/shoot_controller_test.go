@@ -1475,4 +1475,425 @@ jwt:
 			}).Should(BeTrue(), "controller should add auth ConfigMap label when not initially present")
 		})
 	})
+
+	When("a CareInstruction with ShootConditionSelectors is created", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-conditions",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "conditions",
+						},
+					},
+					ShootConditionSelectors: []v1alpha1.ShootConditionSelector{
+						{
+							Type:   "APIServerAvailable",
+							Status: "True",
+						},
+					},
+				},
+			}
+		})
+
+		It("should only create secrets for shoots matching the condition", func() {
+			// Create two shoots with the same labels but different conditions
+			shootReady := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ready",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "conditions",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootReady)).To(Succeed(), "should create ready Shoot")
+
+			shootReady.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-ready.example.com",
+					},
+				},
+				Conditions: []gardenerv1beta1.Condition{
+					{
+						Type:   "APIServerAvailable",
+						Status: "True",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootReady)).To(Succeed(), "should update ready Shoot status")
+
+			shootNotReady := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-not-ready",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "conditions",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootNotReady)).To(Succeed(), "should create not-ready Shoot")
+
+			shootNotReady.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-not-ready.example.com",
+					},
+				},
+				Conditions: []gardenerv1beta1.Condition{
+					{
+						Type:   "APIServerAvailable",
+						Status: "False",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootNotReady)).To(Succeed(), "should update not-ready Shoot status")
+
+			// Create CA ConfigMaps for both shoots
+			cmReady := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ready.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data-ready",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cmReady)).To(Succeed(), "should create CA ConfigMap for ready shoot")
+
+			cmNotReady := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-not-ready.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data-not-ready",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cmNotReady)).To(Succeed(), "should create CA ConfigMap for not-ready shoot")
+
+			// Eventually verify only the ready shoot has a secret created
+			Eventually(func(g Gomega) bool {
+				secrets := &corev1.SecretList{}
+				g.Expect(test.K8sClient.List(test.Ctx, secrets, client.MatchingLabels{
+					v1alpha1.CareInstructionLabel: careInstruction.Name,
+				})).To(Succeed(), "should list Secrets")
+
+				// Should only have one secret for the ready shoot
+				g.Expect(secrets.Items).To(HaveLen(1), "should find exactly one Secret")
+				g.Expect(secrets.Items[0].Name).To(Equal("test-shoot-ready"), "secret should be for the ready shoot")
+
+				return true
+			}).Should(BeTrue(), "should eventually create secret only for matching shoot")
+
+			// Verify the not-ready shoot does NOT have a secret
+			Consistently(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-not-ready",
+					Namespace: "default",
+				}, secret)
+				g.Expect(err).To(HaveOccurred(), "should not find secret for not-ready shoot")
+				return true
+			}).Should(BeTrue(), "should consistently not create secret for non-matching shoot")
+		})
+
+		It("should create secrets when multiple conditions match", func() {
+			careInstruction.Spec.ShootConditionSelectors = []v1alpha1.ShootConditionSelector{
+				{
+					Type:   "APIServerAvailable",
+					Status: "True",
+				},
+				{
+					Type:   "ControlPlaneHealthy",
+					Status: "True",
+				},
+			}
+			Expect(test.K8sClient.Update(test.Ctx, careInstruction)).To(Succeed(), "should update CareInstruction")
+
+			// Create shoot with both conditions matching
+			shootBothMatch := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-both-match",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "conditions",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootBothMatch)).To(Succeed(), "should create Shoot")
+
+			shootBothMatch.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-both-match.example.com",
+					},
+				},
+				Conditions: []gardenerv1beta1.Condition{
+					{
+						Type:   "APIServerAvailable",
+						Status: "True",
+					},
+					{
+						Type:   "ControlPlaneHealthy",
+						Status: "True",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootBothMatch)).To(Succeed(), "should update Shoot status")
+
+			// Create shoot with only one condition matching
+			shootOneMatch := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-one-match",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "conditions",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootOneMatch)).To(Succeed(), "should create Shoot")
+
+			shootOneMatch.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-one-match.example.com",
+					},
+				},
+				Conditions: []gardenerv1beta1.Condition{
+					{
+						Type:   "APIServerAvailable",
+						Status: "True",
+					},
+					{
+						Type:   "ControlPlaneHealthy",
+						Status: "False", // This one doesn't match
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootOneMatch)).To(Succeed(), "should update Shoot status")
+
+			// Create CA ConfigMaps
+			cmBothMatch := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-both-match.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cmBothMatch)).To(Succeed(), "should create CA ConfigMap")
+
+			cmOneMatch := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-one-match.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cmOneMatch)).To(Succeed(), "should create CA ConfigMap")
+
+			// Eventually verify only the shoot with all conditions matching has a secret
+			Eventually(func(g Gomega) bool {
+				secrets := &corev1.SecretList{}
+				g.Expect(test.K8sClient.List(test.Ctx, secrets, client.MatchingLabels{
+					v1alpha1.CareInstructionLabel: careInstruction.Name,
+				})).To(Succeed(), "should list Secrets")
+
+				g.Expect(secrets.Items).To(HaveLen(1), "should find exactly one Secret")
+				g.Expect(secrets.Items[0].Name).To(Equal("test-shoot-both-match"), "secret should be for shoot with all conditions matching")
+
+				return true
+			}).Should(BeTrue(), "should eventually create secret only for shoot with all conditions matching")
+		})
+
+		It("should support Progressing condition status", func() {
+			careInstruction.Spec.ShootConditionSelectors = []v1alpha1.ShootConditionSelector{
+				{
+					Type:   "APIServerAvailable",
+					Status: "Progressing",
+				},
+			}
+			Expect(test.K8sClient.Update(test.Ctx, careInstruction)).To(Succeed(), "should update CareInstruction")
+
+			// Create shoot with Progressing condition
+			shootProgressing := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-progressing",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "conditions",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootProgressing)).To(Succeed(), "should create Shoot")
+
+			shootProgressing.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-progressing.example.com",
+					},
+				},
+				Conditions: []gardenerv1beta1.Condition{
+					{
+						Type:   "APIServerAvailable",
+						Status: "Progressing",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootProgressing)).To(Succeed(), "should update Shoot status")
+
+			// Create CA ConfigMap
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-progressing.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap")
+
+			// Eventually verify the secret is created for progressing shoot
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-progressing",
+					Namespace: "default",
+				}, secret)
+				return err == nil
+			}).Should(BeTrue(), "should eventually create secret for shoot with Progressing status")
+		})
+
+		It("should create secret when shoot condition changes from not matching to matching", func() {
+			// Create a shoot that initially doesn't match the condition
+			shootDynamic := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-dynamic",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "conditions",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootDynamic)).To(Succeed(), "should create Shoot")
+
+			// Initially set condition to False (not matching)
+			shootDynamic.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-dynamic.example.com",
+					},
+				},
+				Conditions: []gardenerv1beta1.Condition{
+					{
+						Type:   "APIServerAvailable",
+						Status: "False", // Initially not matching
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootDynamic)).To(Succeed(), "should update Shoot status with False condition")
+
+			// Create CA ConfigMap
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-dynamic.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap")
+
+			// Verify no secret is created initially
+			Consistently(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-dynamic",
+					Namespace: "default",
+				}, secret)
+				g.Expect(err).To(HaveOccurred(), "should not find secret when condition doesn't match")
+				return true
+			}, "8s").Should(BeTrue(), "should consistently not have secret when condition is False")
+
+			// Verify a warning event was emitted
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasWarningEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "ShootConditionsNotMatched" &&
+						event.Type == corev1.EventTypeWarning {
+						g.Expect(event.Message).To(ContainSubstring("test-shoot-dynamic"))
+						g.Expect(event.Message).To(ContainSubstring("matches label selector but does not match required condition selectors"))
+						hasWarningEvent = true
+					}
+				}
+				return hasWarningEvent
+			}).Should(BeTrue(), "should eventually find ShootConditionsNotMatched warning event")
+
+			// Now update the shoot condition to True (matching)
+			shootDynamic.Status.Conditions[0].Status = "True"
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootDynamic)).To(Succeed(), "should update Shoot condition to True")
+
+			// Eventually verify the secret is now created
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-dynamic",
+					Namespace: "default",
+				}, secret)
+				if err != nil {
+					return false
+				}
+
+				// Verify secret has correct labels (only CareInstruction label since PropagateLabels is empty)
+				g.Expect(secret.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, careInstruction.Name))
+
+				// Verify secret has correct annotations
+				g.Expect(secret.Annotations).To(HaveKeyWithValue(greenhouseapis.SecretAPIServerURLAnnotation, "https://api-server.test-shoot-dynamic.example.com"))
+
+				// Verify secret has CA data
+				g.Expect(secret.Data).To(HaveKey("ca.crt"))
+
+				return true
+			}).Should(BeTrue(), "should eventually create secret after condition changes to match")
+
+			// Verify SecretCreated event was emitted
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasCreatedEvent := false
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" &&
+						event.Reason == "SecretCreated" &&
+						event.Type == corev1.EventTypeNormal {
+						g.Expect(event.Message).To(ContainSubstring("Created Greenhouse secret test-shoot-dynamic"))
+						hasCreatedEvent = true
+					}
+				}
+				return hasCreatedEvent
+			}).Should(BeTrue(), "should eventually find SecretCreated event after condition update")
+		})
+	})
 })

@@ -43,6 +43,18 @@ const (
 	ClusterStatusFailed = "Failed"
 )
 
+// ShootConditionSelector allows filtering shoots based on their status conditions.
+type ShootConditionSelector struct {
+	// Type is the type of the condition to match (e.g., "APIServerAvailable", "ControlPlaneHealthy")
+	// +kubebuilder:validation:Required
+	Type gardenerv1beta1.ConditionType `json:"type"`
+
+	// Status is the status of the condition to match (e.g., "True", "False", "Unknown", "Progressing")
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=True;False;Unknown;Progressing
+	Status gardenerv1beta1.ConditionStatus `json:"status"`
+}
+
 // CareInstructionSpec holds the configuration for how to onboard Gardener shoots to Greenhouse.
 type CareInstructionSpec struct {
 
@@ -61,6 +73,12 @@ type CareInstructionSpec struct {
 
 	// ShootSelector is a label selector targeting shoots that should be reconciled.
 	ShootSelector *metav1.LabelSelector `json:"shootSelector,omitempty"`
+
+	// ShootConditionSelectors allows filtering shoots based on their status conditions.
+	// Shoots must match both the ShootSelector (labels) AND all condition selectors (if specified).
+	// Multiple conditions must all match (AND logic).
+	// +optional
+	ShootConditionSelectors []ShootConditionSelector `json:"shootConditionSelectors,omitempty"`
 
 	// PropagateLabels is a list of labels that will be propagated from shoot to Greenhouse Cluster.
 	PropagateLabels []string `json:"propagateLabels,omitempty"`
@@ -141,7 +159,39 @@ func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Cl
 	if err := gardenClient.List(ctx, &shootList, client.InNamespace(c.Spec.GardenNamespace), client.MatchingLabels(c.Spec.ShootSelector.MatchLabels)); err != nil {
 		return gardenerv1beta1.ShootList{}, err
 	}
+
+	// Filter by conditions if specified (all conditions must match)
+	if len(c.Spec.ShootConditionSelectors) > 0 {
+		filteredItems := []gardenerv1beta1.Shoot{}
+		for _, shoot := range shootList.Items {
+			if MatchesAllConditions(shoot, c.Spec.ShootConditionSelectors) {
+				filteredItems = append(filteredItems, shoot)
+			}
+		}
+		shootList.Items = filteredItems
+	}
+
 	return shootList, nil
+}
+
+// MatchesAllConditions checks if a shoot matches all condition selectors (AND logic)
+func MatchesAllConditions(shoot gardenerv1beta1.Shoot, selectors []ShootConditionSelector) bool {
+	for _, selector := range selectors {
+		if !matchesCondition(shoot, selector) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesCondition checks if a shoot's condition matches the selector
+func matchesCondition(shoot gardenerv1beta1.Shoot, selector ShootConditionSelector) bool {
+	for _, condition := range shoot.Status.Conditions {
+		if condition.Type == selector.Type && condition.Status == selector.Status {
+			return true
+		}
+	}
+	return false
 }
 
 // ListClusters returns a list of clusters created by this CareInstruction identified by  owning CareInstruction label.
