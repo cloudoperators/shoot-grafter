@@ -46,17 +46,19 @@ graph LR
         subgraph ShootGrafter["shoot-grafter Operator"]
             CIC[CareInstruction Controller]
             
-            subgraph CI1Box["CareInstruction: prod-shoots"]
-                CI1["Spec:<br/>gardenNamespace: garden--production<br/>shootSelector: env=prod"]
-            end
-            
-            subgraph CI2Box["CareInstruction: dev-shoots"]
-                CI2["Spec:<br/>gardenNamespace: garden--development<br/>shootSelector: env=dev"]
+            subgraph CareInstructions["CareInstructions"]
+                subgraph CI1Box["prod-shoots"]
+                    CI1["Spec:<br/>gardenNamespace: garden--production<br/>shootSelector: env=prod"]
+                end
+                
+                subgraph CI2Box["dev-shoots"]
+                    CI2["Spec:<br/>gardenNamespace: garden--development<br/>shootSelector: env=dev"]
+                end
             end
             
             subgraph DynamicControllers["Dynamically Created Shoot Controllers"]
-                SC1[Shoot-controller-1<br/>watches: garden--production]
-                SC2[Shoot-controller-2<br/>watches: garden--development]
+                SC1[shoot-controller-prod-shoots<br/>watches: garden--production]
+                SC2[shoot-controller-dev-shoots<br/>watches: garden--development]
             end
         end
         
