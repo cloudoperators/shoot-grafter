@@ -26,7 +26,84 @@ shoot-grafter currently only creates clusters matching Shoots but does not autom
 
 ## Architecture
 
-![shoot grafter architecture diagramm](./shoot-grafter-arch.png "Shoot Grafter Architecture")
+```mermaid
+graph LR
+    subgraph Garden["Garden API"]
+        direction TB
+        subgraph NS1["garden--production"]
+            Shoot1["Shoot-prod-1<br/>(env=prod)"]
+            Shoot2["Shoot-prod-2<br/>(env=prod)"]
+        end
+        subgraph NS2["garden--development"]
+            Shoot3["Shoot-dev-1<br/>(env=dev)"]
+            Shoot4["Shoot-dev-2<br/>(env=staging)"]
+        end
+    end
+    
+    subgraph Greenhouse["Greenhouse"]
+        direction TB
+        
+        subgraph ShootGrafter["shoot-grafter Operator"]
+            CIC[CareInstruction Controller]
+            
+            subgraph CI1Box["CareInstruction: prod-shoots"]
+                CI1["Spec:<br/>gardenNamespace: garden--production<br/>shootSelector: env=prod"]
+            end
+            
+            subgraph CI2Box["CareInstruction: dev-shoots"]
+                CI2["Spec:<br/>gardenNamespace: garden--development<br/>shootSelector: env=dev"]
+            end
+            
+            subgraph DynamicControllers["Dynamically Created Shoot Controllers"]
+                SC1[Shoot-controller-1<br/>watches: garden--production]
+                SC2[Shoot-controller-2<br/>watches: garden--development]
+            end
+        end
+        
+        subgraph Resources["Greenhouse Resources"]
+            SecretProd1[Secret: shoot-prod-1]
+            SecretProd2[Secret: shoot-prod-2]
+            SecretDev1[Secret: shoot-dev-1]
+            ClusterProd1[Cluster: shoot-prod-1]
+            ClusterProd2[Cluster: shoot-prod-2]
+            ClusterDev1[Cluster: shoot-dev-1]
+        end
+    end
+    
+    CIC -->|reconciles| CI1
+    CIC -->|reconciles| CI2
+    
+    CI1 -->|creates & manages| SC1
+    CI2 -->|creates & manages| SC2
+    
+    SC1 -->|watches| Shoot1
+    SC1 -->|watches| Shoot2
+    SC2 -->|watches| Shoot3
+    SC2 -->|watches| Shoot4
+    
+    SC1 -->|creates| SecretProd1
+    SC1 -->|creates| SecretProd2
+    SC2 -->|creates| SecretDev1
+    
+    ClusterProd1 -->|depends on| SecretProd1
+    ClusterProd2 -->|depends on| SecretProd2
+    ClusterDev1 -->|depends on| SecretDev1
+    
+    style Garden fill:#a8d5ba,stroke:#000,stroke-width:2px
+    style Greenhouse fill:#b8dde8,stroke:#000,stroke-width:2px
+    style ShootGrafter fill:#ffd699,stroke:#000,stroke-width:2px
+    style CIC fill:#ff9999,stroke:#000,stroke-width:2px
+    style CI1Box fill:#b3e0f2,stroke:#000,stroke-width:2px
+    style CI2Box fill:#b3e0f2,stroke:#000,stroke-width:2px
+    style DynamicControllers fill:#ffffcc,stroke:#000,stroke-width:2px
+    style SC1 fill:#ffeb99,stroke:#000,stroke-width:2px
+    style SC2 fill:#ffeb99,stroke:#000,stroke-width:2px
+    style Resources fill:#d4c5f9,stroke:#000,stroke-width:2px
+    style NS1 stroke:#000,stroke-width:2px
+    style NS2 stroke:#000,stroke-width:2px
+    
+    linkStyle default stroke:#000,stroke-width:2px
+```
 
 The operator consists of two main controllers:
 
