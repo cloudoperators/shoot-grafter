@@ -30,11 +30,13 @@ shoot-grafter currently only creates clusters matching Shoots but does not autom
 graph LR
     subgraph Garden["Garden API"]
         direction TB
-        subgraph NS1["ns: garden--production"]
+        subgraph NS1[" "]
+            NS1Title["Shoots in ns: garden--production"]
             Shoot1["Shoot-prod-1<br/>(env=prod)"]
             Shoot2["Shoot-prod-2<br/>(env=prod)"]
         end
-        subgraph NS2["ns: garden--development"]
+        subgraph NS2[" "]
+            NS2Title["Shoots in ns: garden--development"]
             Shoot3["Shoot-dev-1<br/>(env=dev)"]
             Shoot4["Shoot-dev-2<br/>(env=staging)"]
         end
@@ -46,24 +48,28 @@ graph LR
         subgraph ShootGrafter["shoot-grafter"]
             CIC[CareInstruction Controller]
             
-            subgraph CareInstructions["CareInstructions"]
+            subgraph CareInstructions[" "]
+                CITitle["CareInstructions"]
                 CI1["prod-shoots<br/>gardenNamespace: garden--production<br/>shootSelector: env=prod"]
                 CI2["dev-shoots<br/>gardenNamespace: garden--development<br/>shootSelector: env=dev"]
             end
             
-            subgraph DynamicControllers["Dynamically Created Shoot Controllers"]
+            subgraph DynamicControllers[" "]
+                DCTitle["Dynamically Created Shoot Controllers"]
                 SC1[shoot-controller-prod-shoots<br/>watches: garden--production]
                 SC2[shoot-controller-dev-shoots<br/>watches: garden--development]
             end
         end
         
         subgraph Resources["Greenhouse Resources"]
-            subgraph Secrets["Secrets"]
+            subgraph Secrets[" "]
+                SecretsTitle["Secrets"]
                 SecretProd1[shoot-prod-1]
                 SecretProd2[shoot-prod-2]
                 SecretDev1[shoot-dev-1]
             end
-            subgraph Clusters["Clusters"]
+            subgraph Clusters[" "]
+                ClustersTitle["Clusters"]
                 ClusterProd1[shoot-prod-1]
                 ClusterProd2[shoot-prod-2]
                 ClusterDev1[shoot-dev-1]
@@ -103,6 +109,12 @@ graph LR
     style Clusters fill:#444,stroke:#000,stroke-width:2px,color:#fff
     style NS1 fill:#d0d0d0,stroke:#000,stroke-width:2px,color:#000
     style NS2 fill:#d0d0d0,stroke:#000,stroke-width:2px,color:#000
+    style NS1Title fill:#d0d0d0,stroke:#d0d0d0,color:#000
+    style NS2Title fill:#d0d0d0,stroke:#d0d0d0,color:#000
+    style CITitle fill:#555,stroke:#555,color:#fff
+    style DCTitle fill:#555,stroke:#555,color:#fff
+    style SecretsTitle fill:#444,stroke:#444,color:#fff
+    style ClustersTitle fill:#444,stroke:#444,color:#fff
     
     linkStyle default stroke:#000,stroke-width:2px
 ```
