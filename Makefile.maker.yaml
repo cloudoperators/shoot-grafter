@@ -35,6 +35,8 @@ githubWorkflow:
     tagStrategy:
       - latest
       - sha
+  license:
+    enabled: false
 
 renovate:
   enabled: true
@@ -44,5 +46,3 @@ renovate:
 reuse:
   enabled: false
 
-license:
-  addHeaders: false
