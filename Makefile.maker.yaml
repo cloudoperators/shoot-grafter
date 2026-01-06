@@ -46,3 +46,7 @@ renovate:
 reuse:
   enabled: false
 
+typos:
+  enabled: true
+  extendExcludes:
+    - crd/shoot-grafter.cloudoperators.dev_careinstructions.yaml

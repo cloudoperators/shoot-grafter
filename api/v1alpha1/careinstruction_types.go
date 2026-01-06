@@ -77,7 +77,7 @@ type CareInstructionSpec struct {
 	// ShootConditionSelectors allows filtering shoots based on their status conditions.
 	// Shoots must match both the ShootSelector (labels) AND all condition selectors (if specified).
 	// Multiple conditions must all match (AND logic).
-	// This field will be deprectated with https://github.com/cloudoperators/shoot-grafter/issues/21.
+	// This field will be deprecated with https://github.com/cloudoperators/shoot-grafter/issues/21.
 	// As soon as CEL expressions are supported, entries in the shootConditionSelectors will be transformed to equivalent CEL expressions in the new field and this field will be ignored and removed.
 	// +optional
 	ShootConditionSelectors []ShootConditionSelector `json:"shootConditionSelectors,omitempty"`
