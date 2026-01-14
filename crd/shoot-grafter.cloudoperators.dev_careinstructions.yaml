@@ -105,6 +105,35 @@ spec:
                 items:
                   type: string
                 type: array
+              shootConditionSelectors:
+                description: |-
+                  ShootConditionSelectors allows filtering shoots based on their status conditions.
+                  Shoots must match both the ShootSelector (labels) AND all condition selectors (if specified).
+                  Multiple conditions must all match (AND logic).
+                  This field will be deprecated with https://github.com/cloudoperators/shoot-grafter/issues/21.
+                  As soon as CEL expressions are supported, entries in the shootConditionSelectors will be transformed to equivalent CEL expressions in the new field and this field will be ignored and removed.
+                items:
+                  description: ShootConditionSelector allows filtering shoots based
+                    on their status conditions.
+                  properties:
+                    status:
+                      description: Status is the status of the condition to match
+                        (e.g., "True", "False", "Unknown", "Progressing")
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      - Progressing
+                      type: string
+                    type:
+                      description: Type is the type of the condition to match (e.g.,
+                        "APIServerAvailable", "ControlPlaneHealthy")
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
               shootSelector:
                 description: ShootSelector is a label selector targeting shoots that
                   should be reconciled.

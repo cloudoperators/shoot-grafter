@@ -98,6 +98,16 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	// Check if shoot matches condition selectors
+	if len(r.CareInstruction.Spec.ShootConditionSelectors) > 0 {
+		if !v1alpha1.MatchesAllConditions(shoot, r.CareInstruction.Spec.ShootConditionSelectors) {
+			r.Info("Shoot does not match condition selectors, skipping", "name", shoot.Name, "conditions", shoot.Status.Conditions)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ShootConditionsNotMatched",
+				fmt.Sprintf("Shoot %s/%s matches label selector but does not match required condition selectors", shoot.Namespace, shoot.Name))
+			return ctrl.Result{}, nil
+		}
+	}
 	apiServerURL := ""
 	// ApiServerURL is the Advertised Address with .name="external".
 	if shoot.Status.AdvertisedAddresses != nil {

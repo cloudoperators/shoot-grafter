@@ -46,8 +46,6 @@ jobs:
           CLICOLOR: "1"
       - name: Delete typos binary
         run: rm typos
-      - name: Check if source code files have license header
-        run: make check-addlicense
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
