@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -71,7 +72,7 @@ func (r *ShootController) SetRBAC(ctx context.Context, shootClient client.Client
 
 		// Compare Subjects
 		// Note: This comparison assumes subjects are in the same order. If order differs, this will trigger a recreate.
-		if !needsRecreate && fmt.Sprint(existingCRB.Subjects) != fmt.Sprint(clusterRoleBinding.Subjects) {
+		if !needsRecreate && !cmp.Equal(existingCRB.Subjects, clusterRoleBinding.Subjects) {
 			r.Info("Subjects differ, will recreate",
 				"existing", existingCRB.Subjects,
 				"desired", clusterRoleBinding.Subjects)
@@ -82,6 +83,8 @@ func (r *ShootController) SetRBAC(ctx context.Context, shootClient client.Client
 			r.Info("Deleting existing ClusterRoleBinding", "ClusterRoleBinding", clusterRoleBinding.Name, "shoot", shootName)
 			if err := shootClient.Delete(ctx, existingCRB); err != nil {
 				r.Error(err, "failed to delete existing ClusterRoleBinding", "ClusterRoleBinding", clusterRoleBinding.Name)
+				r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "RBACRecreationFailed",
+					fmt.Sprintf("Failed to recreate ClusterRoleBinding %s for shoot %s/%s: %v", clusterRoleBinding.Name, r.CareInstruction.Namespace, shootName, err))
 				return
 			}
 
