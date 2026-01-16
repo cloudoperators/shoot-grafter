@@ -42,6 +42,7 @@ func (r *ShootController) setRBAC(ctx context.Context, shootClient client.Client
 		},
 	}
 	if err := shootClient.Create(ctx, clusterRoleBinding); err != nil {
+		r.Info("RBAC failure:", "name", shootName, "err", err)
 		if !apierrors.IsAlreadyExists(err) {
 			r.Error(err, "failed to create ClusterRoleBinding for Greenhouse ServiceAccount", "ClusterRoleBinding", clusterRoleBinding.Name)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "RBACCreationFailed",
