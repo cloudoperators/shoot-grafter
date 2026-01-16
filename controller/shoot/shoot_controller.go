@@ -251,7 +251,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		} else {
 			r.Info("got shootClient for RBAC config, configuring RBAC on Shoot", "name", shoot.Name)
 		}
-		r.setRBAC(ctx, shootClient, shoot.GetName())
+		r.SetRBAC(ctx, shootClient, shoot.GetName())
 	} else {
 		r.Info("RBAC config disabled, skipping configuration of RBAC on Shoot", "name", shoot.Name)
 	}
