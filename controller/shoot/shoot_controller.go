@@ -248,6 +248,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ShootClientFetchFailed",
 				fmt.Sprintf("Failed to get Shoot cluster client for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 			return ctrl.Result{}, err
+		} else {
+			r.Info("got shootClient for RBAC config, configuring RBAC on Shoot", "name", shoot.Name)
 		}
 		r.setRBAC(ctx, shootClient, shoot.GetName())
 	} else {
