@@ -7,6 +7,16 @@ import (
 	"fmt"
 )
 
+// PluginDefinitionReference defines the reference to the PluginDefinition or ClusterPluginDefinition.
+type PluginDefinitionReference struct {
+	// Name of the referenced PluginDefinition or ClusterPluginDefinition resource.
+	// +Optional
+	Name string `json:"name,omitempty"`
+	// Kind of the referent. Supported values: PluginDefinition, ClusterPluginDefinition.
+	// +kubebuilder:validation:Enum=PluginDefinition;ClusterPluginDefinition
+	Kind string `json:"kind,omitempty"`
+}
+
 // HelmChartReference references a Helm Chart in a chart repository.
 type HelmChartReference struct {
 	// Name of the HelmChart chart.
@@ -47,4 +57,18 @@ type UIApplicationReference struct {
 
 	// Version of the frontend application.
 	Version string `json:"version"`
+}
+
+// WaitForItem is a wrapper around PluginRef to add context for every WaitFor list item.
+type WaitForItem struct {
+	// PluginRef defines a reference to the Plugin.
+	PluginRef `json:"pluginRef"`
+}
+
+// PluginRef defines a reference to the Plugin, either by its name or the PluginPreset that it's created from.
+type PluginRef struct {
+	// Name of the Plugin.
+	Name string `json:"name,omitempty"`
+	// PluginPreset is the name of the PluginPreset which creates the Plugin.
+	PluginPreset string `json:"pluginPreset,omitempty"`
 }
