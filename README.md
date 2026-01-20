@@ -26,6 +26,99 @@ shoot-grafter currently only creates clusters matching Shoots but does not autom
 
 ## Architecture
 
+```mermaid
+graph LR
+    subgraph Garden["Garden API"]
+        direction TB
+        subgraph NS1[" "]
+            NS1Title["Shoots in ns: garden--production"]
+            Shoot1["Shoot-prod-1<br/>(env=prod)"]
+            Shoot2["Shoot-prod-2<br/>(env=prod)"]
+        end
+        subgraph NS2[" "]
+            NS2Title["Shoots in ns: garden--development"]
+            Shoot3["Shoot-dev-1<br/>(env=dev)"]
+            Shoot4["Shoot-dev-2<br/>(env=staging)"]
+        end
+    end
+    
+    subgraph Greenhouse["Greenhouse"]
+        direction TB
+        
+        subgraph ShootGrafter["shoot-grafter"]
+            CIC[CareInstruction Controller]
+            
+            subgraph CareInstructions[" "]
+                CITitle["CareInstructions"]
+                CI1["prod-shoots<br/>gardenNamespace: garden--production<br/>shootSelector: env=prod"]
+                CI2["dev-shoots<br/>gardenNamespace: garden--development<br/>shootSelector: env=dev"]
+            end
+            
+            subgraph DynamicControllers[" "]
+                DCTitle["Dynamically Created Shoot Controllers"]
+                SC1[shoot-controller-prod-shoots<br/>watches: garden--production]
+                SC2[shoot-controller-dev-shoots<br/>watches: garden--development]
+            end
+        end
+        
+        subgraph Resources["Greenhouse Resources"]
+            subgraph Secrets[" "]
+                SecretsTitle["Secrets"]
+                SecretProd1[shoot-prod-1]
+                SecretProd2[shoot-prod-2]
+                SecretDev1[shoot-dev-1]
+            end
+            subgraph Clusters[" "]
+                ClustersTitle["Clusters"]
+                ClusterProd1[shoot-prod-1]
+                ClusterProd2[shoot-prod-2]
+                ClusterDev1[shoot-dev-1]
+            end
+        end
+    end
+    
+    CIC -->|reconciles| CI1
+    CIC -->|reconciles| CI2
+    
+    CI1 -->|creates & manages| SC1
+    CI2 -->|creates & manages| SC2
+    
+    SC1 -->|watches| Shoot1
+    SC1 -->|watches| Shoot2
+    SC2 -->|watches| Shoot3
+    SC2 -->|watches| Shoot4
+    
+    SC1 -->|creates| SecretProd1
+    SC1 -->|creates| SecretProd2
+    SC2 -->|creates| SecretDev1
+    
+    ClusterProd1 -->|depends on| SecretProd1
+    ClusterProd2 -->|depends on| SecretProd2
+    ClusterDev1 -->|depends on| SecretDev1
+    
+    style Garden fill:#f5f5f5,stroke:#000,stroke-width:2px,color:#000
+    style Greenhouse fill:#f5f5f5,stroke:#000,stroke-width:2px,color:#000
+    style ShootGrafter fill:#333,stroke:#000,stroke-width:2px,color:#fff
+    style CareInstructions fill:#555,stroke:#000,stroke-width:2px,color:#fff
+    style CIC fill:#444,stroke:#000,stroke-width:2px,color:#fff
+    style DynamicControllers fill:#555,stroke:#000,stroke-width:2px,color:#fff
+    style SC1 fill:#666,stroke:#000,stroke-width:2px,color:#fff
+    style SC2 fill:#666,stroke:#000,stroke-width:2px,color:#fff
+    style Resources fill:#333,stroke:#000,stroke-width:2px,color:#fff
+    style Secrets fill:#444,stroke:#000,stroke-width:2px,color:#fff
+    style Clusters fill:#444,stroke:#000,stroke-width:2px,color:#fff
+    style NS1 fill:#d0d0d0,stroke:#000,stroke-width:2px,color:#000
+    style NS2 fill:#d0d0d0,stroke:#000,stroke-width:2px,color:#000
+    style NS1Title fill:#d0d0d0,stroke:#d0d0d0,color:#000
+    style NS2Title fill:#d0d0d0,stroke:#d0d0d0,color:#000
+    style CITitle fill:#555,stroke:#555,color:#fff
+    style DCTitle fill:#555,stroke:#555,color:#fff
+    style SecretsTitle fill:#444,stroke:#444,color:#fff
+    style ClustersTitle fill:#444,stroke:#444,color:#fff
+    
+    linkStyle default stroke:#000,stroke-width:2px
+```
+
 The operator consists of two main controllers:
 
 ### CareInstruction Controller
@@ -37,13 +130,6 @@ The `CareInstruction` is the primary Custom Resource Definition (CRD) that confi
 - Declares label selectors to filter which Shoots to onboard
 - Configures label propagation and additional metadata
 - Manages the lifecycle of dynamically created Shoot controllers
-
-**Key features**:
-
-- Dynamically spawns and manages Shoot controllers for each CareInstruction
-- Monitors Garden cluster accessibility
-- Tracks onboarding status and statistics
-- Handles cleanup when CareInstructions are deleted
 
 ### Shoot Controller
 
@@ -67,7 +153,7 @@ apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: production-shoots
-  namespace: greenhouse-team
+  namespace: greenhouse-org
 spec:
   # Option 1: Reference a Greenhouse Cluster resource
   gardenClusterName: garden-prod-cluster
@@ -85,17 +171,14 @@ spec:
     matchLabels:
       environment: production
       team: platform
-      shoot.gardener.cloud/status: "healthy"
   
   # Labels to propagate from Shoot to Greenhouse Cluster
   propagateLabels:
-    - region
-    - cost-center
-    - business-unit
+    - metadata.greenhouse.sap/region
+    - greenhouse.sap/owned-by
   
   # Additional labels to add to all created Clusters
   additionalLabels:
-    managed-by: shoot-grafter
     onboarding-source: garden-prod
   
   # Reference to AuthenticationConfiguration ConfigMap (optional)
@@ -107,12 +190,12 @@ spec:
 
 ### CareInstruction Spec Fields
 
-| Field | Type | Required | Description |‚
+| Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `gardenClusterName` | string | No*| Name of the Greenhouse Cluster resource representing the Garden cluster |
 | `gardenClusterKubeConfigSecretName` | SecretKeyReference | No* | Reference to a secret containing the kubeconfig for the Garden cluster |
 | `gardenNamespace` | string | Yes | Namespace in the Garden cluster where Shoots are located |
-| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). It is recommended to always use `shoot.gardener.cloud/status: "healthy"` to only onboard healthy Shoots. |
+| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
 | `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)|
@@ -149,9 +232,9 @@ status:
       status: Ready
     - name: shoot-cluster-3
       status: Failed
-      message: Cluster managed by different CareInstruction: other-careinstruction
-  totalShootCount: 15
-  createdClusters: 15
+      message: couldn't get current server API group list: the server has asked for the client to provide credentials
+  totalShootCount: 3
+  createdClusters: 2
   failedClusters: 1
 ```
 
@@ -168,7 +251,7 @@ status:
 
 ## Usage Examples
 
-### Example 1: Onboard all healthy Shoots in a namespace
+### Example 1: Onboard all Shoots in a namespace
 
 ```yaml
 apiVersion: shoot-grafter.cloudoperators/v1alpha1
@@ -179,12 +262,9 @@ metadata:
 spec:
   gardenClusterName: dev-garden
   gardenNamespace: garden--dev
-  shootSelector:
-    matchLabels:
-      shoot.gardener.cloud/status: "healthy"
 ```
 
-### Example 2: Onboard healthy Shoots with specific labels
+### Example 2: Onboard Shoots with specific labels
 
 ```yaml
 apiVersion: shoot-grafter.cloudoperators/v1alpha1
@@ -198,10 +278,9 @@ spec:
   shootSelector:
     matchLabels:
       environment: production
-      shoot.gardener.cloud/status: "healthy"
   propagateLabels:
-    - region
-    - owned-by
+    - metadata.greenhouse.sap/region
+    - greenhouse.sap/owned-by
   additionalLabels:
     monitoring: enabled
     backup: daily
@@ -230,9 +309,9 @@ spec:
       - key: owned-by
         operator: Exists
   propagateLabels:
-    - environment
-    - region
-    - owned-by
+    - metadata.greenhouse.sap/region
+    - metadata.greenhouse.sap/environment
+    - greenhouse.sap/owned-by
   additionalLabels:
     onboarding-method: shoot-grafter
 ```
@@ -252,10 +331,10 @@ spec:
   gardenNamespace: garden--production
   shootSelector:
     matchLabels:
-      oidc-enabled: "true"
+      enabled-oidc: "true"
   authenticationConfigMapRef: greenhouse-oidc-config
   propagateLabels:
-    - environment
+    - metadata.greenhouse.sap/environment
 ```
 
 The referenced ConfigMap should contain an AuthenticationConfiguration:
@@ -318,11 +397,12 @@ shoot-grafter emits the following events during Shoot reconciliation:
 
 | Event Reason | Description |
 |-------------|-------------|
-| `ShootReconciling` | Reconciliation has started for a Shoot |
 | `ShootReconciled` | Successfully completed reconciliation for a Shoot |
 | `SecretCreated` | Created Greenhouse secret with cluster credentials |
 | `SecretUpdated` | Updated existing Greenhouse secret with new credentials |
 | `ShootDeleted` | Shoot was deleted from the Garden cluster |
+| `OIDCConfigured` | Successfully configured OIDC authentication for the Shoot |
+| `RBACCreated` | Created RBAC ClusterRoleBinding for Greenhouse ServiceAccount on the Shoot |
 
 #### Warning Events (Issues Requiring Attention)
 
@@ -332,6 +412,9 @@ shoot-grafter emits the following events during Shoot reconciliation:
 | `CAConfigMapFetchFailed` | Failed to fetch CA certificate ConfigMap | Verify ConfigMap `<shoot-name>.ca-cluster` exists in Garden namespace |
 | `CADataMissing` | CA certificate data is empty in ConfigMap | Check ConfigMap data contains valid `ca.crt` entry |
 | `SecretOperationFailed` | Failed to create or update Greenhouse secret | Check RBAC permissions and Greenhouse cluster connectivity |
+| `OIDCConfigurationFailed` | Failed to configure OIDC authentication on the Shoot | Verify AuthenticationConfigMap exists and contains valid configuration; check Garden cluster connectivity and permissions |
+| `ShootClientFetchFailed` | Failed to get Shoot cluster client | Verify Shoot is accessible and kubeconfig is valid; check network connectivity to Shoot cluster |
+| `RBACCreationFailed` | Failed to create RBAC ClusterRoleBinding on the Shoot | Check connectivity to Shoot cluster; verify service account has sufficient permissions |
 
 ### Event Retention
 
