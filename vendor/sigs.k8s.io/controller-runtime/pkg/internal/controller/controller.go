@@ -473,7 +473,7 @@ func (c *Controller[request]) reconcileHandler(ctx context.Context, req request,
 		}
 		log.Error(err, "Reconciler error")
 	case result.RequeueAfter > 0:
-		log.V(5).Info(fmt.Sprintf("Reconcile done, requeuing after %s", result.RequeueAfter))
+		log.V(5).Info(fmt.Sprintf("Reconcile done, requeueing after %s", result.RequeueAfter))
 		// The result.RequeueAfter request will be lost, if it is returned
 		// along with a non-nil error. But this is intended as
 		// We need to drive to stable reconcile loops before queuing due
@@ -482,7 +482,7 @@ func (c *Controller[request]) reconcileHandler(ctx context.Context, req request,
 		c.Queue.AddWithOpts(priorityqueue.AddOpts{After: result.RequeueAfter, Priority: ptr.To(priority)}, req)
 		ctrlmetrics.ReconcileTotal.WithLabelValues(c.Name, labelRequeueAfter).Inc()
 	case result.Requeue: //nolint: staticcheck // We have to handle it until it is removed
-		log.V(5).Info("Reconcile done, requeuing")
+		log.V(5).Info("Reconcile done, requeueing")
 		c.Queue.AddWithOpts(priorityqueue.AddOpts{RateLimited: true, Priority: ptr.To(priority)}, req)
 		ctrlmetrics.ReconcileTotal.WithLabelValues(c.Name, labelRequeue).Inc()
 	default:
