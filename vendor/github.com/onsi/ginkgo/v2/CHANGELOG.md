@@ -1,3 +1,18 @@
+## 2.27.3
+
+### Fixes
+report exit result in case of failure [1c9f356]
+fix data race [ece19c8]
+
+## 2.27.2
+
+### Fixes
+- inline automaxprocs to simplify dependencies; this will be removed when Go 1.26 comes out [a69113a]
+
+### Maintenance
+- Fix syntax errors and typo [a99c6e0]
+- Fix paragraph position error [f993df5]
+
 ## 2.27.1
 
 ### Fixes
