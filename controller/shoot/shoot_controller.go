@@ -14,9 +14,11 @@ import (
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	"github.com/cloudoperators/greenhouse/pkg/lifecycle"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
@@ -114,33 +116,31 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// Initialize labels and label propagation with the CareInstruction labels
-	labels := map[string]string{
-		v1alpha1.CareInstructionLabel: r.CareInstruction.Name,
+	// Specify which labels to propagate from the Shoot to the Secret
+	if shoot.Annotations == nil {
+		shoot.Annotations = make(map[string]string)
 	}
-	var labelPropagateBuilder strings.Builder
-	labelPropagateBuilder.WriteString(v1alpha1.CareInstructionLabel)
-	labelPropagateBuilder.WriteString(",")
-	// get labels specified via TransportLabels on the CareInstruction from the shoot
-	for _, v := range r.CareInstruction.Spec.PropagateLabels {
-		if labelValue, ok := shoot.Labels[v]; ok {
-			labels[v] = labelValue
-			labelPropagateBuilder.WriteString(v)
-			labelPropagateBuilder.WriteString(",")
-		}
-	}
-	// get additional labels specified via AdditionalLabels on the CareInstruction
+	shoot.Annotations[lifecycle.PropagateLabelsAnnotation] = strings.Join(r.CareInstruction.Spec.PropagateLabels, ",")
+	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
+	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
+
+	// Initialize secret labels based on CareInstruction
+	secretLabels := make(map[string]string)
+
+	// Get additional labels to set on the Secret
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
 		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
-			labels[k] = v
-			labelPropagateBuilder.WriteString(k)
-			labelPropagateBuilder.WriteString(",")
+			secretLabels[k] = v
+			labelKeysToPropagate = append(labelKeysToPropagate, k)
 		}
 	}
-	labelPropagateString := labelPropagateBuilder.String()
 
-	annotations := map[string]string{
-		"greenhouse.sap/propagate-labels":           labelPropagateString,
+	// Set the identifying label
+	secretLabels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
+	labelKeysToPropagate = append(labelKeysToPropagate, v1alpha1.CareInstructionLabel)
+
+	secretAnnotations := map[string]string{
+		"greenhouse.sap/propagate-labels":           strings.Join(labelKeysToPropagate, ","),
 		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
 	}
 
@@ -169,8 +169,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        shoot.Name,
 			Namespace:   r.CareInstruction.Namespace,
-			Annotations: annotations,
-			Labels:      labels,
+			Annotations: secretAnnotations,
+			Labels:      secretLabels,
 		},
 		Data: map[string][]byte{
 			"ca.crt": caDataBase64Enc,
@@ -186,12 +186,15 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
 		}
-		maps.Copy(secret.Annotations, annotations)
+		maps.Copy(secret.Annotations, secretAnnotations)
 		// Merge labels - preserve existing ones and add/update ours
 		if secret.Labels == nil {
 			secret.Labels = make(map[string]string)
 		}
-		maps.Copy(secret.Labels, labels)
+		maps.Copy(secret.Labels, secretLabels)
+
+		// Transport Shoot labels to the Secret
+		secret = (lifecycle.NewPropagator(&shoot, secret).Apply()).(*v1.Secret) //nolint:errcheck
 		return nil
 	})
 	if err != nil {
