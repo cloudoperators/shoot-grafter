@@ -31,12 +31,22 @@ type PluginPresetSpec struct {
 	ClusterSelector metav1.LabelSelector `json:"clusterSelector"`
 
 	// ClusterOptionOverrides define plugin option values to override by the PluginPreset
-	// +kubebuilder:validation:Optional
+	// +Optional
 	ClusterOptionOverrides []ClusterOptionOverride `json:"clusterOptionOverrides,omitempty"`
+
+	// WaitFor defines other Plugins to wait for before creating the Plugin.
+	WaitFor []WaitForItem `json:"waitFor,omitempty"`
+
+	// DeletionPolicy defines how Plugins owned by a PluginPreset are handled on deletion of the PluginPreset.
+	// Supported values are "Delete" and "Retain". If not set, defaults to "Delete".
+	// +Optional
+	// +kubebuilder:default=Delete
+	// +kubebuilder:validation:Enum=Delete;Retain
+	DeletionPolicy string `json:"deletionPolicy,omitempty"`
 }
 
 // ClusterOptionOverride defines which plugin option should be override in which cluster
-// +kubebuilder:validation:Optional
+// +Optional
 type ClusterOptionOverride struct {
 	ClusterName string              `json:"clusterName"`
 	Overrides   []PluginOptionValue `json:"overrides"`
@@ -47,6 +57,8 @@ const (
 	PluginSkippedCondition greenhousemetav1alpha1.ConditionType = "PluginSkipped"
 	// PluginFailedCondition is set when the pluginPreset encounters a failure during the reconciliation of a plugin.
 	PluginFailedCondition greenhousemetav1alpha1.ConditionType = "PluginFailed"
+	// AllPluginsReadyCondition is set when all Plugins managed by the PluginPreset are created and ready.
+	AllPluginsReadyCondition greenhousemetav1alpha1.ConditionType = "AllPluginsReady"
 )
 
 // PluginPresetStatus defines the observed state of PluginPreset
@@ -56,8 +68,8 @@ type PluginPresetStatus struct {
 
 	// PluginStatuses contains statuses of Plugins managed by the PluginPreset.
 	PluginStatuses []ManagedPluginStatus `json:"pluginStatuses,omitempty"`
-	// AvailablePlugins is the number of available Plugins managed by the PluginPreset.
-	AvailablePlugins int `json:"availablePlugins,omitempty"`
+	// TotalPlugins is the number of Plugins in total managed by the PluginPreset.
+	TotalPlugins int `json:"totalPlugins,omitempty"`
 	// ReadyPlugins is the number of ready Plugins managed by the PluginPreset.
 	ReadyPlugins int `json:"readyPlugins,omitempty"`
 	// FailedPlugins is the number of failed Plugins managed by the PluginPreset.
@@ -72,7 +84,8 @@ type ManagedPluginStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Plugin Definition",type=string,JSONPath=`.spec.plugin.pluginDefinition`
+//+kubebuilder:resource:shortName=pp
+//+kubebuilder:printcolumn:name="Plugin Definition",type=string,JSONPath=`.spec.plugin.pluginDefinitionRef.name`
 //+kubebuilder:printcolumn:name="Release Namespace",type=string,JSONPath=`.spec.plugin.releaseNamespace`
 //+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=`.status.statusConditions.conditions[?(@.type == "Ready")].status`
 

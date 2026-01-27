@@ -130,6 +130,8 @@ linters:
         - github.com/mdlayher/arp
         # for github.com/sapcc/vpa_butler
         - k8s.io/client-go
+        # for github.com/cloudoperators/greenhouse
+        - github.com/fluxcd/pkg/apis/kustomize
       toolchain-forbidden: true
       go-version-pattern: 1\.\d+(\.0)?$
     gosec:
