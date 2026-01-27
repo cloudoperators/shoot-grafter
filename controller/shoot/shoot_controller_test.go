@@ -601,6 +601,102 @@ var _ = Describe("Shoot Controller", func() {
 				return true
 			}).Should(BeTrue(), "should eventually preserve both controller and external annotations/labels")
 		})
+
+		It("should correctly propagate labels matching the wildcard", func() {
+			// Set to only propagate labels matching the wildcard
+			careInstruction.Spec.PropagateLabels = []string{"test/*"}
+
+			// Create a shoot and set some test/* labels on it
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-merge",
+					Namespace: "default",
+					Labels: map[string]string{
+						"foo":         "bar",
+						"test/label1": "value1",
+						"test/label2": "value2",
+						"baz":         "qux",
+						"test/label3": "value3",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-merge.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create ConfigMap with CA data
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-merge.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// Wait for secret to be created
+			var createdSecret *corev1.Secret
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-merge",
+					Namespace: "default",
+				}, secret)
+				if err == nil {
+					createdSecret = secret
+					return true
+				}
+				return false
+			}).Should(BeTrue(), "should eventually create secret")
+
+			// Add external annotations and labels to the secret (simulating external controller or user)
+			createdSecret.Annotations["external-annotation"] = "external-value"
+			createdSecret.Labels["external-label"] = "external-value"
+			Expect(test.K8sClient.Update(test.Ctx, createdSecret)).To(Succeed(), "should update secret with external annotations and labels")
+
+			// Trigger reconciliation by updating shoot
+			shoot.Labels["trigger"] = "merge-test"
+			Expect(test.GardenK8sClient.Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot to trigger reconciliation")
+
+			// Verify that all labels matching the PropagateLabels have been propagated from Shoot to Secret
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-merge",
+					Namespace: "default",
+				}, secret)
+				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
+
+				// Check that controller-managed annotations are present
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("greenhouse.sap/propagate-labels", "test/*,quux,shoot-grafter.cloudoperators.dev/careinstruction"))
+				g.Expect(secret.Annotations).To(HaveKeyWithValue(greenhouseapis.SecretAPIServerURLAnnotation, "https://api-server.test-shoot-merge.example.com"))
+
+				// Check that external annotation is preserved
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("external-annotation", "external-value"), "should preserve external annotation")
+
+				// Check that controller-managed labels are present
+				g.Expect(secret.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, "test-careinstruction"))
+				g.Expect(secret.Labels).To(HaveKeyWithValue("quux", "corge"))
+				g.Expect(secret.Labels).To(HaveKeyWithValue("test/label1", "value1"))
+				g.Expect(secret.Labels).To(HaveKeyWithValue("test/label2", "value2"))
+				g.Expect(secret.Labels).To(HaveKeyWithValue("test/label3", "value3"))
+
+				// Check that external label is preserved
+				g.Expect(secret.Labels).To(HaveKeyWithValue("external-label", "external-value"), "should preserve external label")
+
+				return true
+			}).Should(BeTrue(), "should eventually preserve both controller and external annotations/labels")
+		})
 	})
 
 	When("a CareInstruction with an empty ShootSelector is created", func() {
