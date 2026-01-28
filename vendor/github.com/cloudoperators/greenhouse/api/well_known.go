@@ -39,17 +39,50 @@ const (
 	// LabelKeyPluginDefinition is used to identify corresponding PluginDefinition for the resource.
 	LabelKeyPluginDefinition = "greenhouse.sap/plugindefinition"
 
+	// LabelKeyClusterPluginDefinition is used to identify the corresponding ClusterPluginDefinition for the resource.
+	LabelKeyClusterPluginDefinition = "greenhouse.sap/clusterplugindefinition"
+
 	// LabelKeyCluster is used to identify corresponding Cluster for the resource.
 	LabelKeyCluster = "greenhouse.sap/cluster"
 
-	// LabelKeyExposeService is applied to services that are part of a PluginDefinitions Helm chart to expose them via the central Greenhouse infrastructure.
-	LabelKeyExposeService = "greenhouse.sap/expose"
+	// AnnotationKeyExpose marks services and ingresses for exposure via Plugin status.
+	// For services: set to "true" or specify a named port to be exposed via service-proxy.
+	// For ingresses: set to "true" to expose the ingress URL directly.
+	AnnotationKeyExpose = "greenhouse.sap/expose"
 
-	// LabelKeyExposeNamedPort is specifying the port to be exposed by name. LabelKeyExposeService needs to be set. Defaults to the first port if the named port is not found.
-	LabelKeyExposeNamedPort = "greenhouse.sap/exposeNamedPort"
+	// AnnotationKeyExposedNamedPort specifies which service port to expose by name when AnnotationKeyExpose is set.
+	// Only applies to services. Defaults to the first port if the named port is not found.
+	AnnotationKeyExposedNamedPort = "greenhouse.sap/exposed-named-port"
+
+	// AnnotationKeyExposedIngressHost specifies which host to expose when an ingress has multiple host rules.
+	// Only applies to ingresses with AnnotationKeyExpose set. Defaults to the first host if not specified.
+	AnnotationKeyExposedIngressHost = "greenhouse.sap/exposed-host"
 
 	// LabelKeyOwnedBy is used to identify the owning support-group team of a resource.
 	LabelKeyOwnedBy = "greenhouse.sap/owned-by"
+
+	// LabelKeyMetadataPrefix is the prefix for cluster metadata labels that are transferred to Plugin template data.
+	LabelKeyMetadataPrefix = "metadata.greenhouse.sap/"
+
+	// LabelKeyCatalog is used to identify the owning catalog resource of (Cluster)PluginDefinitions.
+	LabelKeyCatalog = "greenhouse.sap/catalog"
+
+	// LabelKeyCatalogSource is used to identify the source of the owning catalog resource of (Cluster)PluginDefinitions.
+	LabelKeyCatalogSource = "greenhouse.sap/catalog-source"
+
+	// LabelKeyUIPlugin is used to identify Plugins that have a UI component.
+	LabelKeyUIPlugin = "greenhouse.sap/ui-plugin"
+
+	// LabelKeyPluginExposedServices is used to identify Plugins that expose services.
+	LabelKeyPluginExposedServices = "greenhouse.sap/plugin-exposed-services"
+	// LabelKeyPluginIntegration is used to identify resources that are part of plugin-plugin integration scenarios.
+	LabelKeyPluginIntegration = "greenhouse.sap/integration"
+	// LabelValuePluginIntegration will be used as list selector value to identify resources that are part of plugin-plugin integration scenarios.
+	LabelValuePluginIntegration = "true"
+	// AnnotationKeyPluginTackingID is used to identify the resources that are resolving values from the tracked plugin.
+	AnnotationKeyPluginTackingID = "greenhouse.sap/tracking-id"
+
+	FluxReconcileRequestAnnotation = "reconcile.fluxcd.io/requestedAt"
 )
 
 // TeamRole and TeamRoleBinding constants
@@ -74,6 +107,19 @@ const (
 
 	// ConfigMapRefField is the field in the Organization spec that references the ConfigMap containing organizational configuration data.
 	ConfigMapRefField = ".spec.configMapRef"
+
+	// KindClusterPluginDefinitionPlural is the plural form of ClusterPluginDefinition kind.
+	KindClusterPluginDefinitionPlural = "clusterplugindefinitions"
+	// KindPluginDefinitionPlural is the plural form of PluginDefinition kind.
+	KindPluginDefinitionPlural = "plugindefinitions"
+)
+
+// Deletion Policies
+const (
+	// DeletionPolicyRetain means owned resources will be retained on deletion.
+	DeletionPolicyRetain = "Retain"
+	// DeletionPolicyDelete means owned resources will be deleted on deletion.
+	DeletionPolicyDelete = "Delete"
 )
 
 // Team constants

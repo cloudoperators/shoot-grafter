@@ -8,9 +8,11 @@ import (
 
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	"github.com/cloudoperators/greenhouse/pkg/cel"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -61,6 +63,11 @@ type CareInstructionSpec struct {
 
 	// ShootSelector is a label selector targeting shoots that should be reconciled.
 	ShootSelector *metav1.LabelSelector `json:"shootSelector,omitempty"`
+
+	// ShootFilter is a CEL expression for filtering shoots by status or other fields.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	ShootFilter string `json:"shootFilter,omitempty"`
 
 	// PropagateLabels is a list of labels that will be propagated from shoot to Greenhouse Cluster.
 	PropagateLabels []string `json:"propagateLabels,omitempty"`
@@ -135,13 +142,46 @@ func init() {
 	SchemeBuilder.Register(&CareInstruction{}, &CareInstructionList{})
 }
 
-// ListShoots returns a list of shoots targeted by this CareInstruction.
+// ListShoots returns shoots matching the ShootSelector and ShootFilter.
 func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Client) (gardenerv1beta1.ShootList, error) {
 	shootList := gardenerv1beta1.ShootList{}
 	if err := gardenClient.List(ctx, &shootList, client.InNamespace(c.Spec.GardenNamespace), client.MatchingLabels(c.Spec.ShootSelector.MatchLabels)); err != nil {
 		return gardenerv1beta1.ShootList{}, err
 	}
+
+	if c.Spec.ShootFilter == "" {
+		return shootList, nil
+	}
+
+	shootList.Items = c.filterShootsWithCEL(ctx, shootList.Items)
 	return shootList, nil
+}
+
+// MatchesCELFilter returns whether the shoot matches the ShootFilter CEL expression.
+func (c *CareInstruction) MatchesCELFilter(shoot *gardenerv1beta1.Shoot) (bool, error) {
+	if c.Spec.ShootFilter == "" {
+		return true, nil
+	}
+	return cel.EvaluateTyped[bool](c.Spec.ShootFilter, shoot)
+}
+
+func (c *CareInstruction) filterShootsWithCEL(ctx context.Context, shoots []gardenerv1beta1.Shoot) []gardenerv1beta1.Shoot {
+	logger := log.FromContext(ctx)
+	filteredShoots := make([]gardenerv1beta1.Shoot, 0, len(shoots))
+
+	for i := range shoots {
+		shoot := &shoots[i]
+		matches, err := c.MatchesCELFilter(shoot)
+		if err != nil {
+			logger.Info("skipping shoot, CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
+			continue
+		}
+		if matches {
+			filteredShoots = append(filteredShoots, *shoot)
+		}
+	}
+
+	return filteredShoots
 }
 
 // ListClusters returns a list of clusters created by this CareInstruction identified by  owning CareInstruction label.
