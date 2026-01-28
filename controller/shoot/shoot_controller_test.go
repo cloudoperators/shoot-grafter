@@ -1640,4 +1640,170 @@ jwt:
 			}).Should(BeTrue(), "controller should add auth ConfigMap label when not initially present")
 		})
 	})
+
+	When("using ShootFilter with CEL expression", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-cel",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"test": "cel"},
+					},
+					ShootFilter: `object.status.lastOperation.state == "Succeeded"`,
+				},
+			}
+		})
+
+		It("should only reconcile shoots matching the CEL filter", func() {
+			for _, tc := range []struct {
+				name  string
+				state gardenerv1beta1.LastOperationState
+			}{
+				{"shoot-succeeded", gardenerv1beta1.LastOperationStateSucceeded},
+				{"shoot-failed", gardenerv1beta1.LastOperationStateFailed},
+			} {
+				shoot := &gardenerv1beta1.Shoot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      tc.name,
+						Namespace: "default",
+						Labels:    map[string]string{"test": "cel"},
+					},
+				}
+				Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+
+				shoot.Status = gardenerv1beta1.ShootStatus{
+					AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+						{Name: "external", URL: "https://" + tc.name + ".example.com"},
+					},
+					LastOperation: &gardenerv1beta1.LastOperation{State: tc.state},
+				}
+				Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+				cm := &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      tc.name + ".ca-cluster",
+						Namespace: "default",
+					},
+					Data: map[string]string{"ca.crt": "test-ca-data"},
+				}
+				Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed())
+			}
+
+			Eventually(func(g Gomega) {
+				secrets := &corev1.SecretList{}
+				g.Expect(test.K8sClient.List(test.Ctx, secrets, client.MatchingLabels{
+					v1alpha1.CareInstructionLabel: careInstruction.Name,
+				})).To(Succeed())
+				g.Expect(secrets.Items).To(HaveLen(1))
+				g.Expect(secrets.Items[0].Name).To(Equal("shoot-succeeded"))
+			}).Should(Succeed())
+		})
+	})
+
+	When("using ShootFilter with invalid CEL expression", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-invalid-cel",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"test": "invalid-cel"},
+					},
+					ShootFilter: `invalid syntax here`,
+				},
+			}
+		})
+
+		It("should skip shoots when CEL evaluation fails", func() {
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shoot-invalid-cel",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "invalid-cel"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{Name: "external", URL: "https://shoot-invalid-cel.example.com"},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shoot-invalid-cel.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{"ca.crt": "test-ca-data"},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed())
+
+			Consistently(func(g Gomega) {
+				secrets := &corev1.SecretList{}
+				g.Expect(test.K8sClient.List(test.Ctx, secrets, client.MatchingLabels{
+					v1alpha1.CareInstructionLabel: careInstruction.Name,
+				})).To(Succeed())
+				g.Expect(secrets.Items).To(BeEmpty())
+			}, "3s", "500ms").Should(Succeed())
+		})
+	})
+
+	When("using ShootFilter with CEL expression returning non-bool", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-nonbool-cel",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"test": "nonbool-cel"},
+					},
+					ShootFilter: `object.metadata.name`,
+				},
+			}
+		})
+
+		It("should skip shoots when CEL expression returns non-bool", func() {
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shoot-nonbool-cel",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "nonbool-cel"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{Name: "external", URL: "https://shoot-nonbool-cel.example.com"},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shoot-nonbool-cel.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{"ca.crt": "test-ca-data"},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed())
+
+			Consistently(func(g Gomega) {
+				secrets := &corev1.SecretList{}
+				g.Expect(test.K8sClient.List(test.Ctx, secrets, client.MatchingLabels{
+					v1alpha1.CareInstructionLabel: careInstruction.Name,
+				})).To(Succeed())
+				g.Expect(secrets.Items).To(BeEmpty())
+			}, "3s", "500ms").Should(Succeed())
+		})
+	})
 })
