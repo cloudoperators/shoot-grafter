@@ -18,7 +18,6 @@ import (
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
@@ -194,7 +193,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		maps.Copy(secret.Labels, secretLabels)
 
 		// Transport Shoot labels to the Secret
-		secret = (lifecycle.NewPropagator(&shoot, secret).Apply()).(*v1.Secret) //nolint:errcheck
+		secret = (lifecycle.NewPropagator(&shoot, secret).Apply()).(*corev1.Secret)
 		return nil
 	})
 	if err != nil {
