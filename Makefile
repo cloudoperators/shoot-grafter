@@ -136,6 +136,10 @@ vendor-compat: FORCE
 	go mod vendor
 	go mod verify
 
+check-dependency-licenses: FORCE install-go-licence-detector
+	@printf "\e[1;36m>> go-licence-detector\e[0m\n"
+	@go list -m -mod=readonly -json all | go-licence-detector -includeIndirect -rules .license-scan-rules.json -overrides .license-scan-overrides.jsonl
+
 goimports: FORCE install-goimports
 	@printf "\e[1;36m>> goimports -w -local https://github.com/cloudoperators/shoot-grafter\e[0m\n"
 	@goimports -w -local shoot-grafter $(patsubst $(shell awk '$$1 == "module" {print $$2}' go.mod)%,.%/*.go,$(shell go list ./...))
