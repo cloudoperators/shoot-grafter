@@ -62,6 +62,8 @@ build-all: build/shoot-grafter
 build/shoot-grafter: FORCE generate
 	env $(GO_BUILDENV) go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/shoot-grafter .
 
+UNAME_S := $(shell uname -s)
+SED = sed
 DESTDIR =
 ifeq ($(UNAME_S),Darwin)
 	PREFIX = /usr/local
