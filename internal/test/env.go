@@ -136,7 +136,7 @@ func StartControlPlane(port string) (*rest.Config, client.Client, *envtest.Envir
 	testEnv.ErrorIfCRDPathMissing = true
 
 	testEnv.WebhookInstallOptions = envtest.WebhookInstallOptions{
-		Paths: []string{filepath.Join("..", "..", "config", "webhook", "manifests.yaml")},
+		Paths: []string{filepath.Join("..", "..", "webhook", "manifests.yaml")},
 	}
 
 	testEnv.ControlPlane.GetAPIServer().Port = port
