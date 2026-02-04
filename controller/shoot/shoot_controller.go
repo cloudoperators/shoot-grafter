@@ -99,6 +99,17 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	matches, err := r.CareInstruction.MatchesCELFilter(&shoot)
+	if err != nil {
+		r.Info("CEL filter evaluation failed, skipping shoot", "shoot", shoot.Name, "error", err.Error())
+		return ctrl.Result{}, nil
+	}
+	if !matches {
+		r.Info("shoot filtered out by CEL", "shoot", shoot.Name)
+		return ctrl.Result{}, nil
+	}
+
 	apiServerURL := ""
 	// ApiServerURL is the Advertised Address with .name="external".
 	if shoot.Status.AdvertisedAddresses != nil {
@@ -259,3 +270,4 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 func GenerateName(gardenClusterName string) string {
 	return "shoot-controller-" + gardenClusterName
 }
+
