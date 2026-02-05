@@ -25,6 +25,7 @@ import (
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -343,7 +344,10 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.TotalShoots = 0
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
+	careInstruction.Status.ExcludedShootCount = 0
+	careInstruction.Status.EffectiveShootCount = 0
 	careInstruction.Status.Clusters = []v1alpha1.ClusterStatus{}
+	careInstruction.Status.ExcludedShoots = []v1alpha1.ExcludedShootStatus{}
 
 	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
@@ -351,7 +355,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	gardenClient := r.gardens[gardenKey].gardenClient
 	r.gardensMu.RUnlock()
 
-	// List all shoots targeted by the given CareInstruction
+	// List all shoots targeted by this CareInstruction
 	shoots, err := careInstruction.ListShoots(ctx, *gardenClient)
 	if client.IgnoreNotFound(err) != nil {
 		return err
@@ -361,6 +365,30 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	} else {
 		careInstruction.Status.TotalShoots = len(shoots.Items)
 	}
+
+	var includedShoots []gardenerv1beta1.Shoot
+	for _, shoot := range shoots.Items {
+		matches, err := careInstruction.MatchesCELFilter(&shoot)
+		switch {
+		case err != nil:
+			r.Info("CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
+			careInstruction.Status.ExcludedShoots = append(careInstruction.Status.ExcludedShoots, v1alpha1.ExcludedShootStatus{
+				Name:   shoot.Name,
+				Reason: "CEL evaluation failed: " + err.Error(),
+			})
+			careInstruction.Status.ExcludedShootCount++
+		case !matches:
+			r.Info("Shoot filtered out by CEL expression", "shoot", shoot.Name)
+			careInstruction.Status.ExcludedShoots = append(careInstruction.Status.ExcludedShoots, v1alpha1.ExcludedShootStatus{
+				Name:   shoot.Name,
+				Reason: "filtered out by CEL expression",
+			})
+			careInstruction.Status.ExcludedShootCount++
+		default:
+			includedShoots = append(includedShoots, shoot)
+		}
+	}
+	careInstruction.Status.EffectiveShootCount = len(includedShoots)
 
 	// List all clusters created by this CareInstruction
 	clusters, err := careInstruction.ListClusters(ctx, r.Client)
@@ -373,11 +401,9 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		careInstruction.Status.CreatedClusters = len(clusters.Items)
 	}
 
-	// Check if created TotalCreatedClusters match TotalShoots
-	if careInstruction.Status.TotalShoots != careInstruction.Status.CreatedClusters {
-		// Mismatch detected - check for ownership conflicts
+	if careInstruction.Status.EffectiveShootCount != careInstruction.Status.CreatedClusters {
 		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
-			"totalShoots", careInstruction.Status.TotalShoots,
+			"effectiveShoots", careInstruction.Status.EffectiveShootCount,
 			"createdClusters", careInstruction.Status.CreatedClusters)
 
 		// Build a map of existing cluster names owned by this CareInstruction
@@ -386,10 +412,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			existingClusterNames[cluster.Name] = true
 		}
 
-		// Check shoots that don't have a corresponding cluster in our list
-		for _, shoot := range shoots.Items {
+		for _, shoot := range includedShoots {
 			if existingClusterNames[shoot.Name] {
-				// This shoot has a cluster owned by us, skip
 				continue
 			}
 
@@ -425,7 +449,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			}
 		}
 
-		err := errors.New("total shoots and created clusters do not match")
+		err := errors.New("shoot count and cluster count do not match")
 		return err
 	}
 
