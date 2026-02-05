@@ -1,7 +1,11 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration file for <https://github.com/sapcc/go-makefile-maker>
+#
+# NOTE: After running go-makefile-maker, manually apply these changes:
+# 1. Add 'branches: [main]' to container-registry-ghcr.yaml for main branch builds
+# 2. Change 'make build/cover.out' to 'make test-with-envtest' in ci.yaml for envtest support
 
 metadata:
   url: https://github.com/cloudoperators/shoot-grafter
@@ -13,19 +17,19 @@ binaries:
 
 golang:
   setGoModVersion: true
-  enableVendoring: true
+  enableVendoring: false
 
 golangciLint:
-  createConfig: true
+  createConfig: false
 
+# Kubebuilder targets (controller-gen, setup-envtest, generate) are in hack/kubebuilder.mk
 controllerGen:
-  enabled: true
-  rbacRoleName: manager-role
+  enabled: false
 
 githubWorkflow:
   ci:
     enabled: true
-    runOn: 
+    runOn:
       - "ubuntu-latest"
   global:
     defaultBranch: main
@@ -45,4 +49,15 @@ reuse:
   enabled: false
 
 license:
-  addHeaders: false
+  addHeaders: true
+  checkDependencies: true
+  copyright: '2026 SAP SE or an SAP affiliate company and Greenhouse contributors'
+  spdx: Apache-2.0
+
+typos:
+  enabled: true
+  extendWords:
+    Ded: Ded # Don't correct ANDed from k8s machinery
+
+verbatim: |
+  include hack/kubebuilder.mk

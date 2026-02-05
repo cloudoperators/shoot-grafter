@@ -268,4 +268,3 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 func GenerateName(gardenClusterName string) string {
 	return "shoot-controller-" + gardenClusterName
 }
-

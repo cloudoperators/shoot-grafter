@@ -3,12 +3,12 @@
 # Edit Makefile.maker.yaml instead.                                            #
 ################################################################################
 
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company
 # SPDX-License-Identifier: Apache-2.0
 
 version: "2"
 run:
-  modules-download-mode: vendor
+  modules-download-mode: readonly
   timeout: 3m0s # none by default in v2
 
 formatters:
@@ -130,7 +130,7 @@ linters:
         - github.com/mdlayher/arp
         # for github.com/sapcc/vpa_butler
         - k8s.io/client-go
-        # synced from greenhouse v0.9.0
+        # synced from greenhouse
         - github.com/fluxcd/helm-controller/api
         - github.com/fluxcd/kustomize-controller/api
         - github.com/fluxcd/pkg/apis/kustomize
@@ -151,10 +151,6 @@ linters:
       enable-all: true
     nolintlint:
       require-specific: true
-    modernize:
-      disable:
-        # omitzero requires removing omitempty tags in kubernetes api struct types which are nested, which is interpreted by controller-gen and breaks the CRDs.
-        - omitzero
     perfsprint:
       # modernize generates nicer fix code
       concat-loop: false

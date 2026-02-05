@@ -9,6 +9,8 @@
 name: Container Registry GHCR
 "on":
   push:
+    branches:
+      - main
     tags:
       - '*'
   workflow_dispatch: {}
