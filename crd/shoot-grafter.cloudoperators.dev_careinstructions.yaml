@@ -106,58 +106,63 @@ spec:
                 items:
                   type: string
                 type: array
-              shootFilter:
-                description: ShootFilter is a CEL expression for filtering shoots
-                  by status or other fields.
-                maxLength: 1024
-                type: string
               shootSelector:
-                description: ShootSelector is a label selector targeting shoots that
-                  should be reconciled.
+                description: ShootSelector combines label-based and CEL expression-based
+                  filtering for shoots.
                 properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
-                      properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
+                  expression:
+                    description: Expression is a CEL expression for filtering shoots
+                      by status or other fields.
+                    maxLength: 1024
+                    type: string
+                  labelSelector:
+                    description: LabelSelector is a label selector targeting shoots
+                      that should be reconciled.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
                           description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
                           type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
                     type: object
+                    x-kubernetes-map-type: atomic
                 type: object
-                x-kubernetes-map-type: atomic
             required:
             - gardenNamespace
             type: object
@@ -194,6 +199,32 @@ spec:
                 description: CreatedClusters is the number of clusters created by
                   this CareInstruction.
                 type: integer
+              effectiveShootCount:
+                description: EffectiveShootCount is the number of shoots after CEL
+                  filtering (TotalShoots - ExcludedShootCount).
+                type: integer
+              excludedShootCount:
+                description: ExcludedShootCount is the number of shoots excluded by
+                  the CEL expression.
+                type: integer
+              excludedShoots:
+                description: ExcludedShoots is a list of shoots that were excluded
+                  by the CEL expression.
+                items:
+                  description: ExcludedShootStatus represents a shoot that was excluded
+                    by the CEL expression.
+                  properties:
+                    name:
+                      description: Name of the shoot that was excluded.
+                      type: string
+                    reason:
+                      description: Reason explains why the shoot was excluded.
+                      type: string
+                  required:
+                  - name
+                  - reason
+                  type: object
+                type: array
               failedClusters:
                 description: FailedClusters is the number of clusters that failed
                   to be created by this CareInstruction.
@@ -237,8 +268,8 @@ spec:
                     x-kubernetes-list-type: map
                 type: object
               totalShootCount:
-                description: TotalShootCount is the total number of shoots targeted
-                  by this CareInstruction.
+                description: TotalShootCount is the total number of shoots matching
+                  the label selector (before CEL filtering).
                 type: integer
             type: object
         type: object

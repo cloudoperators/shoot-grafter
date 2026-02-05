@@ -5,6 +5,7 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -12,7 +13,6 @@ import (
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -45,6 +45,18 @@ const (
 	ClusterStatusFailed = "Failed"
 )
 
+// ShootSelector combines label-based and CEL expression-based filtering for shoots.
+type ShootSelector struct {
+	// LabelSelector is a label selector targeting shoots that should be reconciled.
+	// +optional
+	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
+
+	// Expression is a CEL expression for filtering shoots by status or other fields.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Expression string `json:"expression,omitempty"`
+}
+
 // CareInstructionSpec holds the configuration for how to onboard Gardener shoots to Greenhouse.
 type CareInstructionSpec struct {
 
@@ -61,13 +73,9 @@ type CareInstructionSpec struct {
 	// GardenNamespace is the namespace in which Greenhouse will look for shoots on the seed cluster.
 	GardenNamespace string `json:"gardenNamespace"`
 
-	// ShootSelector is a label selector targeting shoots that should be reconciled.
-	ShootSelector *metav1.LabelSelector `json:"shootSelector,omitempty"`
-
-	// ShootFilter is a CEL expression for filtering shoots by status or other fields.
+	// ShootSelector combines label-based and CEL expression-based filtering for shoots.
 	// +optional
-	// +kubebuilder:validation:MaxLength=1024
-	ShootFilter string `json:"shootFilter,omitempty"`
+	ShootSelector *ShootSelector `json:"shootSelector,omitempty"`
 
 	// PropagateLabels is a list of labels that will be propagated from shoot to Greenhouse Cluster.
 	PropagateLabels []string `json:"propagateLabels,omitempty"`
@@ -99,6 +107,15 @@ type ClusterStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ExcludedShootStatus represents a shoot that was excluded by the CEL expression.
+type ExcludedShootStatus struct {
+	// Name of the shoot that was excluded.
+	Name string `json:"name"`
+
+	// Reason explains why the shoot was excluded.
+	Reason string `json:"reason"`
+}
+
 // CareInstructionStatus holds the status of the CareInstruction.
 type CareInstructionStatus struct {
 	// StatusConditions represent the latest available observations of the CareInstruction's current state.
@@ -107,8 +124,17 @@ type CareInstructionStatus struct {
 	// Clusters is a list of clusters managed by this CareInstruction with their detailed status.
 	Clusters []ClusterStatus `json:"clusters,omitempty"`
 
-	// TotalShootCount is the total number of shoots targeted by this CareInstruction.
+	// ExcludedShoots is a list of shoots that were excluded by the CEL expression.
+	ExcludedShoots []ExcludedShootStatus `json:"excludedShoots,omitempty"`
+
+	// TotalShootCount is the total number of shoots matching the label selector (before CEL filtering).
 	TotalShoots int `json:"totalShootCount,omitempty"`
+
+	// ExcludedShootCount is the number of shoots excluded by the CEL expression.
+	ExcludedShootCount int `json:"excludedShootCount,omitempty"`
+
+	// EffectiveShootCount is the number of shoots after CEL filtering (TotalShoots - ExcludedShootCount).
+	EffectiveShootCount int `json:"effectiveShootCount,omitempty"`
 
 	// CreatedClusters is the number of clusters created by this CareInstruction.
 	CreatedClusters int `json:"createdClusters,omitempty"`
@@ -142,46 +168,32 @@ func init() {
 	SchemeBuilder.Register(&CareInstruction{}, &CareInstructionList{})
 }
 
-// ListShoots returns shoots matching the ShootSelector and ShootFilter.
+// ListShoots returns shoots matching the ShootSelector label selector.
 func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Client) (gardenerv1beta1.ShootList, error) {
 	shootList := gardenerv1beta1.ShootList{}
-	if err := gardenClient.List(ctx, &shootList, client.InNamespace(c.Spec.GardenNamespace), client.MatchingLabels(c.Spec.ShootSelector.MatchLabels)); err != nil {
+	listOpts := []client.ListOption{client.InNamespace(c.Spec.GardenNamespace)}
+
+	if c.Spec.ShootSelector != nil && c.Spec.ShootSelector.LabelSelector != nil {
+		selector, err := metav1.LabelSelectorAsSelector(c.Spec.ShootSelector.LabelSelector)
+		if err != nil {
+			return gardenerv1beta1.ShootList{}, fmt.Errorf("invalid label selector: %w", err)
+		}
+		listOpts = append(listOpts, client.MatchingLabelsSelector{Selector: selector})
+	}
+
+	if err := gardenClient.List(ctx, &shootList, listOpts...); err != nil {
 		return gardenerv1beta1.ShootList{}, err
 	}
 
-	if c.Spec.ShootFilter == "" {
-		return shootList, nil
-	}
-
-	shootList.Items = c.filterShootsWithCEL(ctx, shootList.Items)
 	return shootList, nil
 }
 
-// MatchesCELFilter returns whether the shoot matches the ShootFilter CEL expression.
+// MatchesCELFilter returns whether the shoot matches the CEL expression.
 func (c *CareInstruction) MatchesCELFilter(shoot *gardenerv1beta1.Shoot) (bool, error) {
-	if c.Spec.ShootFilter == "" {
+	if c.Spec.ShootSelector == nil || c.Spec.ShootSelector.Expression == "" {
 		return true, nil
 	}
-	return cel.EvaluateTyped[bool](c.Spec.ShootFilter, shoot)
-}
-
-func (c *CareInstruction) filterShootsWithCEL(ctx context.Context, shoots []gardenerv1beta1.Shoot) []gardenerv1beta1.Shoot {
-	logger := log.FromContext(ctx)
-	filteredShoots := make([]gardenerv1beta1.Shoot, 0, len(shoots))
-
-	for i := range shoots {
-		shoot := &shoots[i]
-		matches, err := c.MatchesCELFilter(shoot)
-		if err != nil {
-			logger.Info("skipping shoot, CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
-			continue
-		}
-		if matches {
-			filteredShoots = append(filteredShoots, *shoot)
-		}
-	}
-
-	return filteredShoots
+	return cel.EvaluateTyped[bool](c.Spec.ShootSelector.Expression, shoot)
 }
 
 // ListClusters returns a list of clusters created by this CareInstruction identified by  owning CareInstruction label.

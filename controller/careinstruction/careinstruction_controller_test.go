@@ -336,9 +336,11 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName: test.GardenClusterName,
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"shootSelector": "selector1",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"shootSelector": "selector1",
+							},
 						},
 					},
 				},
@@ -352,9 +354,11 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName: test.GardenClusterName,
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"shootSelector": "selector2",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"shootSelector": "selector2",
+							},
 						},
 					},
 				},
@@ -599,9 +603,11 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName: test.GardenClusterName,
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "cluster-names",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "cluster-names",
+							},
 						},
 					},
 				},
@@ -768,9 +774,11 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName: test.GardenClusterName,
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "ownership-conflict",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "ownership-conflict",
+							},
 						},
 					},
 				},
@@ -809,9 +817,11 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName: test.GardenClusterName,
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "ownership-conflict",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "ownership-conflict",
+							},
 						},
 					},
 				},
@@ -949,6 +959,214 @@ var _ = Describe("CareInstruction Controller", func() {
 			// 	return true
 			// }).Should(BeTrue(), "should eventually stop the Shoot controller for the deleted CareInstruction")
 
+		})
+	})
+
+	Context("When using CEL expression filtering", func() {
+		It("should filter shoots and populate ExcludedShoots status", func() {
+			shootSucceeded1 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-shoot-succeeded-1",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-filter"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootSucceeded1)).To(Succeed())
+			shootSucceeded1.Status = gardenerv1beta1.ShootStatus{
+				LastOperation: &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootSucceeded1)).To(Succeed())
+
+			shootSucceeded2 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-shoot-succeeded-2",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-filter"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootSucceeded2)).To(Succeed())
+			shootSucceeded2.Status = gardenerv1beta1.ShootStatus{
+				LastOperation: &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootSucceeded2)).To(Succeed())
+
+			shootFailed := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-shoot-failed",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-filter"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shootFailed)).To(Succeed())
+			shootFailed.Status = gardenerv1beta1.ShootStatus{
+				LastOperation: &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateFailed},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shootFailed)).To(Succeed())
+
+			careInstruction := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cel-filter",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "cel-filter"},
+						},
+						Expression: `object.status.lastOperation.state == "Succeeded"`,
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed())
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+				g.Expect(careInstruction.Status.TotalShoots).To(Equal(3))
+				g.Expect(careInstruction.Status.ExcludedShootCount).To(Equal(1))
+				g.Expect(careInstruction.Status.ExcludedShoots).To(HaveLen(1))
+				if len(careInstruction.Status.ExcludedShoots) > 0 {
+					g.Expect(careInstruction.Status.ExcludedShoots[0].Name).To(Equal("cel-shoot-failed"))
+					g.Expect(careInstruction.Status.ExcludedShoots[0].Reason).To(ContainSubstring("filtered out by CEL expression"))
+				}
+				return true
+			}).Should(BeTrue())
+
+			cluster1 := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shootSucceeded1.Name,
+					Namespace: "default",
+					Labels:    map[string]string{v1alpha1.CareInstructionLabel: careInstruction.Name},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{AccessMode: greenhousev1alpha1.ClusterAccessModeDirect},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster1)).To(Succeed())
+			cluster1.Status.SetConditions(greenhousemetav1alpha1.NewCondition(
+				greenhousemetav1alpha1.ReadyCondition, metav1.ConditionTrue, "ClusterReady", "Cluster is ready"))
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster1)).To(Succeed())
+
+			cluster2 := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shootSucceeded2.Name,
+					Namespace: "default",
+					Labels:    map[string]string{v1alpha1.CareInstructionLabel: careInstruction.Name},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{AccessMode: greenhousev1alpha1.ClusterAccessModeDirect},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster2)).To(Succeed())
+			cluster2.Status.SetConditions(greenhousemetav1alpha1.NewCondition(
+				greenhousemetav1alpha1.ReadyCondition, metav1.ConditionTrue, "ClusterReady", "Cluster is ready"))
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster2)).To(Succeed())
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(2))
+				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0))
+				shootsReconciledCondition := careInstruction.Status.GetConditionByType(v1alpha1.ShootsReconciledCondition)
+				g.Expect(shootsReconciledCondition).ToNot(BeNil())
+				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionTrue))
+				return true
+			}).Should(BeTrue())
+		})
+
+		It("should handle invalid CEL expression gracefully", func() {
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-invalid-shoot",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test": "cel-invalid",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+
+			careInstruction := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cel-invalid",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "cel-invalid",
+							},
+						},
+						Expression: `invalid syntax here`,
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed())
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+				g.Expect(careInstruction.Status.TotalShoots).To(Equal(1))
+				g.Expect(careInstruction.Status.ExcludedShootCount).To(Equal(1))
+				g.Expect(careInstruction.Status.ExcludedShoots).To(HaveLen(1))
+				if len(careInstruction.Status.ExcludedShoots) > 0 {
+					g.Expect(careInstruction.Status.ExcludedShoots[0].Name).To(Equal("cel-invalid-shoot"))
+					g.Expect(careInstruction.Status.ExcludedShoots[0].Reason).To(ContainSubstring("CEL evaluation failed"))
+				}
+				return true
+			}).Should(BeTrue())
+		})
+
+		It("should not filter when CEL expression is empty", func() {
+			shoot1 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-empty-shoot-1",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-empty"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot1)).To(Succeed())
+
+			shoot2 := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-empty-shoot-2",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-empty"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot2)).To(Succeed())
+
+			careInstruction := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cel-empty",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "cel-empty"},
+						},
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed())
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+				g.Expect(careInstruction.Status.TotalShoots).To(Equal(2))
+				g.Expect(careInstruction.Status.ExcludedShootCount).To(Equal(0))
+				g.Expect(careInstruction.Status.ExcludedShoots).To(BeEmpty())
+				return true
+			}).Should(BeTrue())
 		})
 	})
 
