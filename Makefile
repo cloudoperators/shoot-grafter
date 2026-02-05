@@ -41,6 +41,9 @@ install-typos: FORCE
 install-go-licence-detector: FORCE
 	@if ! hash go-licence-detector 2>/dev/null; then printf "\e[1;36m>> Installing go-licence-detector (this may take a while)...\e[0m\n"; go install go.elastic.co/go-licence-detector@latest; fi
 
+install-addlicense: FORCE
+	@if ! hash addlicense 2>/dev/null; then printf "\e[1;36m>> Installing addlicense (this may take a while)...\e[0m\n"; go install github.com/google/addlicense@latest; fi
+
 prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos install-go-licence-detector
 
 install-controller-gen: FORCE
@@ -117,6 +120,10 @@ build/cover.out: FORCE generate install-setup-envtest | build
 build/cover.html: build/cover.out
 	@printf "\e[1;36m>> go tool cover > build/cover.html\e[0m\n"
 	@go tool cover -html $< -o $@
+
+check-addlicense: FORCE install-addlicense
+	@printf "\e[1;36m>> addlicense --check\e[0m\n"
+	@addlicense --check -- $(patsubst $(shell awk '$$1 == "module" {print $$2}' go.mod)%,.%/*.go,$(shell go list ./...))
 
 __static-check: FORCE run-shellcheck run-golangci-lint check-dependency-licenses
 
