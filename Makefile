@@ -3,7 +3,7 @@
 # Edit Makefile.maker.yaml instead.                                            #
 ################################################################################
 
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company
 # SPDX-License-Identifier: Apache-2.0
 
 # macOS ships with make 3.81 from 2006, which does not support all the features that we want (e.g. --warn-undefined-variables)
@@ -23,8 +23,17 @@ ifneq (,$(wildcard /etc/os-release)) # check file existence
 		SHELL := /bin/bash
 	endif
 endif
+UNAME_S := $(shell uname -s)
+SED = sed
+XARGS = xargs
+ifeq ($(UNAME_S),Darwin)
+	SED = gsed
+	XARGS = gxargs
+endif
 
 default: build-all
+
+include hack/kubebuilder.mk
 
 install-goimports: FORCE
 	@if ! hash goimports 2>/dev/null; then printf "\e[1;36m>> Installing goimports (this may take a while)...\e[0m\n"; go install golang.org/x/tools/cmd/goimports@latest; fi
@@ -41,17 +50,14 @@ install-typos: FORCE
 install-go-licence-detector: FORCE
 	@if ! hash go-licence-detector 2>/dev/null; then printf "\e[1;36m>> Installing go-licence-detector (this may take a while)...\e[0m\n"; go install go.elastic.co/go-licence-detector@latest; fi
 
-prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos install-go-licence-detector
+install-addlicense: FORCE
+	@if ! hash addlicense 2>/dev/null; then printf "\e[1;36m>> Installing addlicense (this may take a while)...\e[0m\n"; go install github.com/google/addlicense@latest; fi
 
-install-controller-gen: FORCE
-	@if ! hash controller-gen 2>/dev/null; then printf "\e[1;36m>> Installing controller-gen (this may take a while)...\e[0m\n"; go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest; fi
-
-install-setup-envtest: FORCE
-	@if ! hash setup-envtest 2>/dev/null; then printf "\e[1;36m>> Installing setup-envtest (this may take a while)...\e[0m\n"; go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest; fi
+prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos install-go-licence-detector install-addlicense
 
 # To add additional flags or values (before the default ones), specify the variable in the environment, e.g. `GO_BUILDFLAGS='-tags experimental' make`.
 # To override the default flags or values, specify the variable on the command line, e.g. `make GO_BUILDFLAGS='-tags experimental'`.
-GO_BUILDFLAGS += -mod vendor
+GO_BUILDFLAGS +=
 GO_LDFLAGS +=
 GO_TESTFLAGS +=
 GO_TESTENV +=
@@ -59,7 +65,7 @@ GO_BUILDENV +=
 
 build-all: build/shoot-grafter
 
-build/shoot-grafter: FORCE generate
+build/shoot-grafter: FORCE
 	env $(GO_BUILDENV) go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/shoot-grafter .
 
 DESTDIR =
@@ -88,12 +94,6 @@ comma := ,
 check: FORCE static-check build/cover.html build-all
 	@printf "\e[1;32m>> All checks successful.\e[0m\n"
 
-generate: install-controller-gen
-	@printf "\e[1;36m>> controller-gen\e[0m\n"
-	@controller-gen crd rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=crd
-	@controller-gen object paths="./..."
-	@controller-gen applyconfiguration paths="./..."
-
 run-golangci-lint: FORCE install-golangci-lint
 	@printf "\e[1;36m>> golangci-lint\e[0m\n"
 	@golangci-lint config verify
@@ -101,22 +101,28 @@ run-golangci-lint: FORCE install-golangci-lint
 
 run-shellcheck: FORCE install-shellcheck
 	@printf "\e[1;36m>> shellcheck\e[0m\n"
-	@find . \( -path './vendor/*' -prune \) -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.zsh' -o -name '*.sh' -o -name '*.shlib' \) -exec shellcheck  {} +
+	@find .  -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.zsh' -o -name '*.sh' -o -name '*.shlib' \) -exec shellcheck  {} +
 
 run-typos: FORCE install-typos
 	@printf "\e[1;36m>> typos\e[0m\n"
 	@typos
 
-build/cover.out: FORCE generate install-setup-envtest | build
+build/cover.out: FORCE | build
 	@printf "\e[1;36m>> Running tests\e[0m\n"
-	KUBEBUILDER_ASSETS=$$(setup-envtest use 1.34 -p path) go run github.com/onsi/ginkgo/v2/ginkgo run --randomize-all -output-dir=build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -covermode=count -coverpkg=$(subst $(space),$(comma),$(GO_COVERPKGS)) $(GO_TESTFLAGS) $(GO_TESTPKGS)
+	@env $(GO_TESTENV) go run github.com/onsi/ginkgo/v2/ginkgo run --randomize-all -output-dir=build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -covermode=count -coverpkg=$(subst $(space),$(comma),$(GO_COVERPKGS)) $(GO_TESTFLAGS) $(GO_TESTPKGS)
 	@awk < build/coverprofile.out '$$1 != "mode:" { is_filename[$$1] = true; counts1[$$1]+=$$2; counts2[$$1]+=$$3 } END { for (filename in is_filename) { printf "%s %d %d\n", filename, counts1[filename], counts2[filename]; } }' | sort | $(SED) '1s/^/mode: count\n/' > $@
 
 build/cover.html: build/cover.out
 	@printf "\e[1;36m>> go tool cover > build/cover.html\e[0m\n"
 	@go tool cover -html $< -o $@
 
-__static-check: FORCE run-shellcheck run-golangci-lint check-dependency-licenses
+check-addlicense: FORCE install-addlicense
+	@printf "\e[1;36m>> addlicense --check\e[0m\n"
+	@addlicense --check -- $(patsubst $(shell awk '$$1 == "module" {print $$2}' go.mod)%,.%/*.go,$(shell go list ./...))
+
+check-license-headers: FORCE check-addlicense
+
+__static-check: FORCE run-shellcheck run-golangci-lint check-dependency-licenses check-license-headers
 
 static-check: FORCE
 	@$(MAKE) --keep-going --no-print-directory __static-check
@@ -124,15 +130,22 @@ static-check: FORCE
 build:
 	@mkdir $@
 
-vendor: FORCE
+tidy-deps: FORCE
 	go mod tidy
-	go mod vendor
 	go mod verify
 
-vendor-compat: FORCE
-	go mod tidy -compat=$(shell awk '$$1 == "go" { print $$2 }' < go.mod)
-	go mod vendor
-	go mod verify
+license-headers: FORCE install-addlicense
+	@printf "\e[1;36m>> addlicense (for license headers on source code files)\e[0m\n"
+	@printf "%s\0" $(patsubst $(shell awk '$$1 == "module" {print $$2}' go.mod)%,.%/*.go,$(shell go list ./...)) | $(XARGS) -0 -I{} bash -c 'year="$$(grep 'Copyright' {} | head -n1 | grep -E -o '"'"'[0-9]{4}(-[0-9]{4})?'"'"')"; if [[ -z "$$year" ]]; then year=$$(date +%Y); fi; gawk -i inplace '"'"'{if (display) {print} else {!/^\/\*/ && !/^\*/}}; {if (!display && $$0 ~ /^(package |$$)/) {display=1} else { }}'"'"' {}; addlicense -c "2026 SAP SE or an SAP affiliate company and Greenhouse contributors" -s=only -y "$$year" -- {}; $(SED) -i '"'"'1s+// Copyright +// SPDX-FileCopyrightText: +'"'"' {}; '
+	@printf "\e[1;36m>> reuse annotate (for license headers on other files)\e[0m\n"
+	@reuse lint -j | jq -r '.non_compliant.missing_licensing_info[]' | grep -vw vendor | $(XARGS) reuse annotate -c '2026 SAP SE or an SAP affiliate company and Greenhouse contributors' -l Apache-2.0 --skip-unrecognised
+	@printf "\e[1;36m>> reuse download --all\e[0m\n"
+	@reuse download --all
+	@printf "\e[1;35mPlease review the changes. If *.license files were generated, consider instructing go-makefile-maker to add overrides to REUSE.toml instead.\e[0m\n"
+
+check-dependency-licenses: FORCE install-go-licence-detector
+	@printf "\e[1;36m>> go-licence-detector\e[0m\n"
+	@go list -m -mod=readonly -json all | go-licence-detector -includeIndirect -rules .license-scan-rules.json -overrides .license-scan-overrides.jsonl
 
 goimports: FORCE install-goimports
 	@printf "\e[1;36m>> goimports -w -local https://github.com/cloudoperators/shoot-grafter\e[0m\n"
@@ -147,6 +160,7 @@ vars: FORCE
 	@printf "GO_BUILDFLAGS=$(GO_BUILDFLAGS)\n"
 	@printf "GO_COVERPKGS=$(GO_COVERPKGS)\n"
 	@printf "GO_LDFLAGS=$(GO_LDFLAGS)\n"
+	@printf "GO_TESTENV=$(GO_TESTENV)\n"
 	@printf "GO_TESTFLAGS=$(GO_TESTFLAGS)\n"
 	@printf "GO_TESTPKGS=$(GO_TESTPKGS)\n"
 	@printf "MAKE=$(MAKE)\n"
@@ -154,6 +168,7 @@ vars: FORCE
 	@printf "PREFIX=$(PREFIX)\n"
 	@printf "SED=$(SED)\n"
 	@printf "UNAME_S=$(UNAME_S)\n"
+	@printf "XARGS=$(XARGS)\n"
 help: FORCE
 	@printf "\n"
 	@printf "\e[1mUsage:\e[0m\n"
@@ -169,9 +184,8 @@ help: FORCE
 	@printf "  \e[36minstall-shellcheck\e[0m           Install shellcheck required by run-shellcheck/static-check\n"
 	@printf "  \e[36minstall-typos\e[0m                Install typos required by run-typos/static-check\n"
 	@printf "  \e[36minstall-go-licence-detector\e[0m  Install-go-licence-detector required by check-dependency-licenses/static-check\n"
+	@printf "  \e[36minstall-addlicense\e[0m           Install addlicense required by check-license-headers/license-headers/static-check\n"
 	@printf "  \e[36mprepare-static-check\e[0m         Install any tools required by static-check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
-	@printf "  \e[36minstall-controller-gen\e[0m       Install controller-gen required by static-check and build-all. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
-	@printf "  \e[36minstall-setup-envtest\e[0m        Install setup-envtest required by check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
 	@printf "\n"
 	@printf "\e[1mBuild\e[0m\n"
 	@printf "  \e[36mbuild-all\e[0m                    Build all binaries.\n"
@@ -180,17 +194,19 @@ help: FORCE
 	@printf "\n"
 	@printf "\e[1mTest\e[0m\n"
 	@printf "  \e[36mcheck\e[0m                        Run the test suite (unit tests and golangci-lint).\n"
-	@printf "  \e[36mgenerate\e[0m                     Generate code for Kubernetes CRDs and deepcopy.\n"
 	@printf "  \e[36mrun-golangci-lint\e[0m            Install and run golangci-lint. Installing is used in CI, but you should probably install golangci-lint using your package manager.\n"
 	@printf "  \e[36mrun-shellcheck\e[0m               Install and run shellcheck. Installing is used in CI, but you should probably install shellcheck using your package manager.\n"
 	@printf "  \e[36mrun-typos\e[0m                    Check for spelling errors using typos.\n"
 	@printf "  \e[36mbuild/cover.out\e[0m              Run tests and generate coverage report.\n"
 	@printf "  \e[36mbuild/cover.html\e[0m             Generate an HTML file with source code annotations from the coverage report.\n"
+	@printf "  \e[36mcheck-addlicense\e[0m             Check license headers in all non-vendored .go files with addlicense.\n"
+	@printf "  \e[36mcheck-license-headers\e[0m        Run static code checks\n"
 	@printf "  \e[36mstatic-check\e[0m                 Run static code checks\n"
 	@printf "\n"
 	@printf "\e[1mDevelopment\e[0m\n"
-	@printf "  \e[36mvendor\e[0m                       Run go mod tidy, go mod verify, and go mod vendor.\n"
-	@printf "  \e[36mvendor-compat\e[0m                Same as 'make vendor' but go mod tidy will use '-compat' flag with the Go version from go.mod file as value.\n"
+	@printf "  \e[36mtidy-deps\e[0m                    Run go mod tidy and go mod verify.\n"
+	@printf "  \e[36mlicense-headers\e[0m              Add (or overwrite) license headers on all non-vendored source code files.\n"
+	@printf "  \e[36mcheck-dependency-licenses\e[0m    Check all dependency licenses using go-licence-detector.\n"
 	@printf "  \e[36mgoimports\e[0m                    Run goimports on all non-vendored .go files\n"
 	@printf "  \e[36mclean\e[0m                        Run git clean.\n"
 
