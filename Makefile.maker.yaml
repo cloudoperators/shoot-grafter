@@ -16,7 +16,7 @@ golang:
   enableVendoring: true
 
 golangciLint:
-  createConfig: true
+  createConfig: false
 
 controllerGen:
   enabled: true
@@ -45,4 +45,12 @@ reuse:
   enabled: false
 
 license:
-  addHeaders: false
+  addHeaders: false # we might decide to do license headers with g-m-m instead of OSPO provided gh-workflow, disabling for now
+  checkDependencies: true
+  copyright: '2026 SAP SE or an SAP affiliate company and Greenhouse contributors'
+  spdx: Apache-2.0
+
+typos:
+  enabled: true
+  extendWords:
+    Ded: Ded # Don't correct ANDed from k8s machinery

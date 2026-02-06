@@ -23,6 +23,13 @@ ifneq (,$(wildcard /etc/os-release)) # check file existence
 		SHELL := /bin/bash
 	endif
 endif
+UNAME_S := $(shell uname -s)
+SED = sed
+XARGS = xargs
+ifeq ($(UNAME_S),Darwin)
+	SED = gsed
+	XARGS = gxargs
+endif
 
 default: build-all
 
@@ -40,9 +47,6 @@ install-typos: FORCE
 
 install-go-licence-detector: FORCE
 	@if ! hash go-licence-detector 2>/dev/null; then printf "\e[1;36m>> Installing go-licence-detector (this may take a while)...\e[0m\n"; go install go.elastic.co/go-licence-detector@latest; fi
-
-install-addlicense: FORCE
-	@if ! hash addlicense 2>/dev/null; then printf "\e[1;36m>> Installing addlicense (this may take a while)...\e[0m\n"; go install github.com/google/addlicense@latest; fi
 
 prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos install-go-licence-detector
 
@@ -65,8 +69,6 @@ build-all: build/shoot-grafter
 build/shoot-grafter: FORCE generate
 	env $(GO_BUILDENV) go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/shoot-grafter .
 
-UNAME_S := $(shell uname -s)
-SED = sed
 DESTDIR =
 ifeq ($(UNAME_S),Darwin)
 	PREFIX = /usr/local
@@ -121,11 +123,7 @@ build/cover.html: build/cover.out
 	@printf "\e[1;36m>> go tool cover > build/cover.html\e[0m\n"
 	@go tool cover -html $< -o $@
 
-check-addlicense: FORCE install-addlicense
-	@printf "\e[1;36m>> addlicense --check\e[0m\n"
-	@addlicense --check -- $(patsubst $(shell awk '$$1 == "module" {print $$2}' go.mod)%,.%/*.go,$(shell go list ./...))
-
-__static-check: FORCE run-shellcheck run-golangci-lint check-dependency-licenses
+__static-check: FORCE run-shellcheck run-golangci-lint
 
 static-check: FORCE
 	@$(MAKE) --keep-going --no-print-directory __static-check
@@ -142,10 +140,6 @@ vendor-compat: FORCE
 	go mod tidy -compat=$(shell awk '$$1 == "go" { print $$2 }' < go.mod)
 	go mod vendor
 	go mod verify
-
-check-dependency-licenses: FORCE install-go-licence-detector
-	@printf "\e[1;36m>> go-licence-detector\e[0m\n"
-	@go list -m -mod=readonly -json all | go-licence-detector -includeIndirect -rules .license-scan-rules.json -overrides .license-scan-overrides.jsonl
 
 goimports: FORCE install-goimports
 	@printf "\e[1;36m>> goimports -w -local https://github.com/cloudoperators/shoot-grafter\e[0m\n"
