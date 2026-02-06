@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration file for <https://github.com/sapcc/go-makefile-maker>
@@ -42,12 +42,12 @@ renovate:
     - "@cloudoperators/greenhouse-backend"
 
 reuse:
-  enabled: false
+  enabled: true
 
 license:
-  addHeaders: false # we might decide to do license headers with g-m-m instead of OSPO provided gh-workflow, disabling for now
-  checkDependencies: false
-  copyright: '2026 SAP SE or an SAP affiliate company and Greenhouse contributors'
+  addHeaders: true 
+  checkDependencies: true
+  copyright: 'SAP SE or an SAP affiliate company and Greenhouse contributors'
   spdx: Apache-2.0
 
 typos:

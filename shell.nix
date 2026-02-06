@@ -13,6 +13,7 @@ mkShell {
     gotools # goimports
     kubernetes-controller-tools # controller-gen
     renovate
+    reuse
     setup-envtest
     typos
     # keep this line if you use bash
