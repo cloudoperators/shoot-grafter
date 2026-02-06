@@ -45,10 +45,7 @@ install-shellcheck: FORCE
 install-typos: FORCE
 	@set -eou pipefail;  if ! hash typos 2>/dev/null; then printf "\e[1;36m>> Installing typos...\e[0m\n"; TYPOS_ARCH=$$(uname -m); if [[ "$$TYPOS_ARCH" == "arm64" ]]; then TYPOS_ARCH=aarch64; fi; if command -v curl >/dev/null 2>&1; then GET="curl $${GITHUB_TOKEN:+" -u \":$$GITHUB_TOKEN\""} -sLo-"; elif command -v wget >/dev/null 2>&1; then GET="wget $${GITHUB_TOKEN:+" --password \"$$GITHUB_TOKEN\""} -O-"; else echo "Didn't find curl or wget to download typos"; exit 2; fi; if command -v gh >/dev/null; then TYPOS_GET_RELEASE_JSON="gh api /repos/crate-ci/typos/releases"; else TYPOS_GET_RELEASE_JSON="$$GET https://api.github.com/repos/crate-ci/typos/releases"; fi; TYPOS_VERSION=$$($$TYPOS_GET_RELEASE_JSON | jq -r '.[0].name' ); if [[ $(UNAME_S) == Darwin ]]; then TYPOS_FILE="typos-$$TYPOS_VERSION-$$TYPOS_ARCH-apple-darwin.tar.gz"; elif [[ $(UNAME_S) == Linux ]]; then TYPOS_FILE="typos-$$TYPOS_VERSION-$$TYPOS_ARCH-unknown-linux-musl.tar.gz"; fi; mkdir -p typos; $$GET ""https://github.com/crate-ci/typos/releases/download/$$TYPOS_VERSION/$$TYPOS_FILE"" | tar -C typos -zxf -; BIN=$$(go env GOBIN); if [[ -z $$BIN ]]; then BIN=$$(go env GOPATH)/bin; fi; install -Dm755 typos/typos -t "$$BIN"; rm -rf typos/; fi
 
-install-go-licence-detector: FORCE
-	@if ! hash go-licence-detector 2>/dev/null; then printf "\e[1;36m>> Installing go-licence-detector (this may take a while)...\e[0m\n"; go install go.elastic.co/go-licence-detector@latest; fi
-
-prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos install-go-licence-detector
+prepare-static-check: FORCE install-goimports install-golangci-lint install-shellcheck install-typos
 
 install-controller-gen: FORCE
 	@if ! hash controller-gen 2>/dev/null; then printf "\e[1;36m>> Installing controller-gen (this may take a while)...\e[0m\n"; go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest; fi
@@ -167,38 +164,37 @@ help: FORCE
 	@printf "  make \e[36m<target>\e[0m\n"
 	@printf "\n"
 	@printf "\e[1mGeneral\e[0m\n"
-	@printf "  \e[36mvars\e[0m                         Display values of relevant Makefile variables.\n"
-	@printf "  \e[36mhelp\e[0m                         Display this help.\n"
+	@printf "  \e[36mvars\e[0m                    Display values of relevant Makefile variables.\n"
+	@printf "  \e[36mhelp\e[0m                    Display this help.\n"
 	@printf "\n"
 	@printf "\e[1mPrepare\e[0m\n"
-	@printf "  \e[36minstall-goimports\e[0m            Install goimports required by goimports/static-check\n"
-	@printf "  \e[36minstall-golangci-lint\e[0m        Install golangci-lint required by run-golangci-lint/static-check\n"
-	@printf "  \e[36minstall-shellcheck\e[0m           Install shellcheck required by run-shellcheck/static-check\n"
-	@printf "  \e[36minstall-typos\e[0m                Install typos required by run-typos/static-check\n"
-	@printf "  \e[36minstall-go-licence-detector\e[0m  Install-go-licence-detector required by check-dependency-licenses/static-check\n"
-	@printf "  \e[36mprepare-static-check\e[0m         Install any tools required by static-check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
-	@printf "  \e[36minstall-controller-gen\e[0m       Install controller-gen required by static-check and build-all. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
-	@printf "  \e[36minstall-setup-envtest\e[0m        Install setup-envtest required by check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
+	@printf "  \e[36minstall-goimports\e[0m       Install goimports required by goimports/static-check\n"
+	@printf "  \e[36minstall-golangci-lint\e[0m   Install golangci-lint required by run-golangci-lint/static-check\n"
+	@printf "  \e[36minstall-shellcheck\e[0m      Install shellcheck required by run-shellcheck/static-check\n"
+	@printf "  \e[36minstall-typos\e[0m           Install typos required by run-typos/static-check\n"
+	@printf "  \e[36mprepare-static-check\e[0m    Install any tools required by static-check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
+	@printf "  \e[36minstall-controller-gen\e[0m  Install controller-gen required by static-check and build-all. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
+	@printf "  \e[36minstall-setup-envtest\e[0m   Install setup-envtest required by check. This is used in CI before dropping privileges, you should probably install all the tools using your package manager\n"
 	@printf "\n"
 	@printf "\e[1mBuild\e[0m\n"
-	@printf "  \e[36mbuild-all\e[0m                    Build all binaries.\n"
-	@printf "  \e[36mbuild/shoot-grafter\e[0m          Build shoot-grafter.\n"
-	@printf "  \e[36minstall\e[0m                      Install all binaries. This option understands the conventional 'DESTDIR' and 'PREFIX' environment variables for choosing install locations.\n"
+	@printf "  \e[36mbuild-all\e[0m               Build all binaries.\n"
+	@printf "  \e[36mbuild/shoot-grafter\e[0m     Build shoot-grafter.\n"
+	@printf "  \e[36minstall\e[0m                 Install all binaries. This option understands the conventional 'DESTDIR' and 'PREFIX' environment variables for choosing install locations.\n"
 	@printf "\n"
 	@printf "\e[1mTest\e[0m\n"
-	@printf "  \e[36mcheck\e[0m                        Run the test suite (unit tests and golangci-lint).\n"
-	@printf "  \e[36mgenerate\e[0m                     Generate code for Kubernetes CRDs and deepcopy.\n"
-	@printf "  \e[36mrun-golangci-lint\e[0m            Install and run golangci-lint. Installing is used in CI, but you should probably install golangci-lint using your package manager.\n"
-	@printf "  \e[36mrun-shellcheck\e[0m               Install and run shellcheck. Installing is used in CI, but you should probably install shellcheck using your package manager.\n"
-	@printf "  \e[36mrun-typos\e[0m                    Check for spelling errors using typos.\n"
-	@printf "  \e[36mbuild/cover.out\e[0m              Run tests and generate coverage report.\n"
-	@printf "  \e[36mbuild/cover.html\e[0m             Generate an HTML file with source code annotations from the coverage report.\n"
-	@printf "  \e[36mstatic-check\e[0m                 Run static code checks\n"
+	@printf "  \e[36mcheck\e[0m                   Run the test suite (unit tests and golangci-lint).\n"
+	@printf "  \e[36mgenerate\e[0m                Generate code for Kubernetes CRDs and deepcopy.\n"
+	@printf "  \e[36mrun-golangci-lint\e[0m       Install and run golangci-lint. Installing is used in CI, but you should probably install golangci-lint using your package manager.\n"
+	@printf "  \e[36mrun-shellcheck\e[0m          Install and run shellcheck. Installing is used in CI, but you should probably install shellcheck using your package manager.\n"
+	@printf "  \e[36mrun-typos\e[0m               Check for spelling errors using typos.\n"
+	@printf "  \e[36mbuild/cover.out\e[0m         Run tests and generate coverage report.\n"
+	@printf "  \e[36mbuild/cover.html\e[0m        Generate an HTML file with source code annotations from the coverage report.\n"
+	@printf "  \e[36mstatic-check\e[0m            Run static code checks\n"
 	@printf "\n"
 	@printf "\e[1mDevelopment\e[0m\n"
-	@printf "  \e[36mvendor\e[0m                       Run go mod tidy, go mod verify, and go mod vendor.\n"
-	@printf "  \e[36mvendor-compat\e[0m                Same as 'make vendor' but go mod tidy will use '-compat' flag with the Go version from go.mod file as value.\n"
-	@printf "  \e[36mgoimports\e[0m                    Run goimports on all non-vendored .go files\n"
-	@printf "  \e[36mclean\e[0m                        Run git clean.\n"
+	@printf "  \e[36mvendor\e[0m                  Run go mod tidy, go mod verify, and go mod vendor.\n"
+	@printf "  \e[36mvendor-compat\e[0m           Same as 'make vendor' but go mod tidy will use '-compat' flag with the Go version from go.mod file as value.\n"
+	@printf "  \e[36mgoimports\e[0m               Run goimports on all non-vendored .go files\n"
+	@printf "  \e[36mclean\e[0m                   Run git clean.\n"
 
 .PHONY: FORCE
