@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration file for <https://github.com/sapcc/go-makefile-maker>
@@ -16,7 +16,7 @@ golang:
   enableVendoring: true
 
 golangciLint:
-  createConfig: true
+  createConfig: false
 
 controllerGen:
   enabled: true
@@ -42,7 +42,15 @@ renovate:
     - "@cloudoperators/greenhouse-backend"
 
 reuse:
-  enabled: false
+  enabled: true
 
 license:
-  addHeaders: false
+  addHeaders: true 
+  checkDependencies: true
+  copyright: 'SAP SE or an SAP affiliate company and Greenhouse contributors'
+  spdx: Apache-2.0
+
+typos:
+  enabled: true
+  extendWords:
+    Ded: Ded # Don't correct ANDed from k8s machinery
