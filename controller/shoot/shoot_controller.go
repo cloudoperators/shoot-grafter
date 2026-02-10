@@ -126,11 +126,13 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// Specify which labels to propagate from the Shoot to the Secret
+	// Specify which labels to propagate from the Shoot to the Secret - LabelPropagator needs to have the labels set on the source object.
+	// TODO: change when LabelPropagator is extended to accommodate this scenario.
 	if shoot.Annotations == nil {
 		shoot.Annotations = make(map[string]string)
 	}
 	shoot.Annotations[lifecycle.PropagateLabelsAnnotation] = strings.Join(r.CareInstruction.Spec.PropagateLabels, ",")
+
 	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
 	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
 
