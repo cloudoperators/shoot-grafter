@@ -43,6 +43,10 @@ renovate:
 
 reuse:
   enabled: true
+  annotations:
+  - paths:
+      - '*/zz_generated.deepcopy.go'
+      - 'crd/*'
 
 license:
   addHeaders: true 

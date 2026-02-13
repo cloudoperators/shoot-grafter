@@ -27,6 +27,12 @@ SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
 path = [
+  "*/zz_generated.deepcopy.go",
+  "crd/*",
+]
+
+[[annotations]]
+path = [
   "vendor/github.com/cloudoperators/greenhouse/**",
 ]
 precedence = "aggregate"
