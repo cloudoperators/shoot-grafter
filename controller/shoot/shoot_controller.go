@@ -83,23 +83,12 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *ShootController) newCELPredicate() predicate.Predicate {
-	return predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
-			shoot, ok := e.Object.(*gardenerv1beta1.Shoot)
-			return ok && r.matchesCEL(shoot)
-		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			shoot, ok := e.ObjectNew.(*gardenerv1beta1.Shoot)
-			return ok && r.matchesCEL(shoot)
-		},
-		DeleteFunc: func(e event.DeleteEvent) bool {
-			return true
-		},
-		GenericFunc: func(e event.GenericEvent) bool {
-			shoot, ok := e.Object.(*gardenerv1beta1.Shoot)
-			return ok && r.matchesCEL(shoot)
-		},
-	}
+	celFilter := predicate.NewPredicateFuncs(func(o client.Object) bool {
+		shoot, ok := o.(*gardenerv1beta1.Shoot)
+		return ok && r.matchesCEL(shoot)
+	})
+	celFilter.DeleteFunc = func(_ event.DeleteEvent) bool { return true }
+	return celFilter
 }
 
 func (r *ShootController) matchesCEL(shoot *gardenerv1beta1.Shoot) bool {

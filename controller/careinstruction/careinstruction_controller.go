@@ -341,13 +341,10 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 // reconcileShootsNClusters - reconciles the clusters created and owned by this CareInstruction.
 func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Reconciling shoots and clusters for CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
-	careInstruction.Status.TotalShoots = 0
+	careInstruction.Status.TotalTargetShoots = 0
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
-	careInstruction.Status.ExcludedShootCount = 0
-	careInstruction.Status.EffectiveShootCount = 0
-	careInstruction.Status.Clusters = []v1alpha1.ClusterStatus{}
-	careInstruction.Status.ExcludedShoots = []v1alpha1.ExcludedShootStatus{}
+	careInstruction.Status.Shoots = []v1alpha1.ShootStatus{}
 
 	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
@@ -361,9 +358,9 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		return err
 	}
 	if apierrors.IsNotFound(err) {
-		careInstruction.Status.TotalShoots = 0
+		careInstruction.Status.TotalTargetShoots = 0
 	} else {
-		careInstruction.Status.TotalShoots = len(shoots.Items)
+		careInstruction.Status.TotalTargetShoots = len(shoots.Items)
 	}
 
 	var includedShoots []gardenerv1beta1.Shoot
@@ -372,23 +369,22 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		switch {
 		case err != nil:
 			r.Info("CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
-			careInstruction.Status.ExcludedShoots = append(careInstruction.Status.ExcludedShoots, v1alpha1.ExcludedShootStatus{
-				Name:   shoot.Name,
-				Reason: "CEL evaluation failed: " + err.Error(),
+			careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, v1alpha1.ShootStatus{
+				Name:    shoot.Name,
+				Status:  v1alpha1.ShootStatusExcluded,
+				Message: "CEL evaluation failed: " + err.Error(),
 			})
-			careInstruction.Status.ExcludedShootCount++
 		case !matches:
 			r.Info("Shoot filtered out by CEL expression", "shoot", shoot.Name)
-			careInstruction.Status.ExcludedShoots = append(careInstruction.Status.ExcludedShoots, v1alpha1.ExcludedShootStatus{
-				Name:   shoot.Name,
-				Reason: "filtered out by CEL expression",
+			careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, v1alpha1.ShootStatus{
+				Name:    shoot.Name,
+				Status:  v1alpha1.ShootStatusExcluded,
+				Message: "filtered out by CEL expression",
 			})
-			careInstruction.Status.ExcludedShootCount++
 		default:
 			includedShoots = append(includedShoots, shoot)
 		}
 	}
-	careInstruction.Status.EffectiveShootCount = len(includedShoots)
 
 	// List all clusters created by this CareInstruction
 	clusters, err := careInstruction.ListClusters(ctx, r.Client)
@@ -401,38 +397,16 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		careInstruction.Status.CreatedClusters = len(clusters.Items)
 	}
 
-	// Clean up secrets for CEL-excluded shoots
-	excludedShootNames := make(map[string]bool)
-	for _, es := range careInstruction.Status.ExcludedShoots {
-		excludedShootNames[es.Name] = true
-	}
-	for _, cluster := range clusters.Items {
-		if excludedShootNames[cluster.Name] {
-			r.Info("Deleting secret for CEL-excluded shoot", "shoot", cluster.Name, "namespace", careInstruction.Namespace)
-			secret := &corev1.Secret{}
-			secret.Name = cluster.Name
-			secret.Namespace = careInstruction.Namespace
-			if err := r.Delete(ctx, secret); client.IgnoreNotFound(err) != nil {
-				return err
-			}
-		}
-	}
-
-	clusters, err = careInstruction.ListClusters(ctx, r.Client)
-	if client.IgnoreNotFound(err) != nil {
-		return err
-	}
-	careInstruction.Status.CreatedClusters = len(clusters.Items)
-
 	// Build a map of existing cluster names owned by this CareInstruction
 	existingClusterNames := make(map[string]bool)
 	for _, cluster := range clusters.Items {
 		existingClusterNames[cluster.Name] = true
 	}
 
-	if careInstruction.Status.EffectiveShootCount != careInstruction.Status.CreatedClusters {
+	effectiveShootCount := len(includedShoots)
+	if effectiveShootCount != careInstruction.Status.CreatedClusters {
 		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
-			"effectiveShoots", careInstruction.Status.EffectiveShootCount,
+			"effectiveShoots", effectiveShootCount,
 			"createdClusters", careInstruction.Status.CreatedClusters)
 
 		// Only check ownership conflicts for shoots that pass all filters.
@@ -453,20 +427,19 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 						"managedBy", ownerLabel,
 						"attemptedBy", careInstruction.Name)
 
-					// Determine cluster status based on actual cluster ready state
-					clusterStatus := v1alpha1.ClusterStatus{
+					shootStatus := v1alpha1.ShootStatus{
 						Name:    shoot.Name,
 						Message: "Cluster managed by different CareInstruction: " + ownerLabel,
 					}
 
 					if existingCluster.Status.IsReadyTrue() {
-						clusterStatus.Status = v1alpha1.ClusterStatusReady
+						shootStatus.Status = v1alpha1.ShootStatusOnboarded
 					} else {
-						clusterStatus.Status = v1alpha1.ClusterStatusFailed
+						shootStatus.Status = v1alpha1.ShootStatusFailed
 						careInstruction.Status.FailedClusters++
 					}
 
-					careInstruction.Status.Clusters = append(careInstruction.Status.Clusters, clusterStatus)
+					careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
 				}
 			} else if !apierrors.IsNotFound(err) {
 				// Some other error occurred
@@ -478,25 +451,25 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		return err
 	}
 
-	// Populate detailed cluster status list
+	// Populate detailed shoot status list from clusters
 	for _, cluster := range clusters.Items {
-		clusterStatus := v1alpha1.ClusterStatus{
+		shootStatus := v1alpha1.ShootStatus{
 			Name: cluster.Name,
 		}
 
 		if cluster.Status.IsReadyTrue() {
-			clusterStatus.Status = v1alpha1.ClusterStatusReady
+			shootStatus.Status = v1alpha1.ShootStatusOnboarded
 		} else {
-			clusterStatus.Status = v1alpha1.ClusterStatusFailed
+			shootStatus.Status = v1alpha1.ShootStatusFailed
 			// Get the message from the Ready condition
 			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
 			if readyCondition != nil && readyCondition.Message != "" {
-				clusterStatus.Message = readyCondition.Message
+				shootStatus.Message = readyCondition.Message
 			}
 			careInstruction.Status.FailedClusters++
 		}
 
-		careInstruction.Status.Clusters = append(careInstruction.Status.Clusters, clusterStatus)
+		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
 	}
 
 	if careInstruction.Status.FailedClusters > 0 {

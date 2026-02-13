@@ -38,11 +38,14 @@ const (
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
 	AuthConfigMapLabel = "shoot-grafter.cloudoperators/authconfigmap"
 
-	// ClusterStatusReady indicates the cluster is ready.
-	ClusterStatusReady = "Ready"
+	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
+	ShootStatusOnboarded = "Onboarded"
 
-	// ClusterStatusFailed indicates the cluster has failed.
-	ClusterStatusFailed = "Failed"
+	// ShootStatusFailed indicates the shoot's Greenhouse Cluster has failed.
+	ShootStatusFailed = "Failed"
+
+	// ShootStatusExcluded indicates the shoot was excluded by the ShootSelector filter criteria.
+	ShootStatusExcluded = "Excluded"
 )
 
 // ShootSelector combines label-based and CEL expression-based filtering for shoots.
@@ -94,26 +97,17 @@ type CareInstructionSpec struct {
 	AuthenticationConfigMapName string `json:"authenticationConfigMapName,omitempty"`
 }
 
-// ClusterStatus represents the status of a single cluster managed by this CareInstruction.
-type ClusterStatus struct {
-	// Name of the cluster.
+// ShootStatus represents the status of a single shoot targeted by this CareInstruction.
+type ShootStatus struct {
+	// Name of the shoot.
 	Name string `json:"name"`
 
-	// Status represents the current state of the cluster (Ready or Failed).
-	// +kubebuilder:validation:Enum=Ready;Failed
+	// Status represents the current state of the shoot (Onboarded, Failed or Excluded).
+	// +kubebuilder:validation:Enum=Onboarded;Failed;Excluded
 	Status string `json:"status"`
 
-	// Message provides additional information about the cluster status when Failed.
+	// Message provides additional information about the shoot status.
 	Message string `json:"message,omitempty"`
-}
-
-// ExcludedShootStatus represents a shoot that was excluded by the CEL expression.
-type ExcludedShootStatus struct {
-	// Name of the shoot that was excluded.
-	Name string `json:"name"`
-
-	// Reason explains why the shoot was excluded.
-	Reason string `json:"reason"`
 }
 
 // CareInstructionStatus holds the status of the CareInstruction.
@@ -121,20 +115,11 @@ type CareInstructionStatus struct {
 	// StatusConditions represent the latest available observations of the CareInstruction's current state.
 	greenhousemetav1alpha1.StatusConditions `json:"statusConditions,omitempty"`
 
-	// Clusters is a list of clusters managed by this CareInstruction with their detailed status.
-	Clusters []ClusterStatus `json:"clusters,omitempty"`
+	// Shoots is a list of shoots targeted by this CareInstruction with their detailed status.
+	Shoots []ShootStatus `json:"shoots,omitempty"`
 
-	// ExcludedShoots is a list of shoots that were excluded by the CEL expression.
-	ExcludedShoots []ExcludedShootStatus `json:"excludedShoots,omitempty"`
-
-	// TotalShootCount is the total number of shoots matching the label selector (before CEL filtering).
-	TotalShoots int `json:"totalShootCount,omitempty"`
-
-	// ExcludedShootCount is the number of shoots excluded by the CEL expression.
-	ExcludedShootCount int `json:"excludedShootCount,omitempty"`
-
-	// EffectiveShootCount is the number of shoots after CEL filtering (TotalShoots - ExcludedShootCount).
-	EffectiveShootCount int `json:"effectiveShootCount,omitempty"`
+	// TotalTargetShoots is the total number of shoots matching the label selector (before CEL filtering).
+	TotalTargetShoots int `json:"totalTargetShootCount,omitempty"`
 
 	// CreatedClusters is the number of clusters created by this CareInstruction.
 	CreatedClusters int `json:"createdClusters,omitempty"`
@@ -168,7 +153,7 @@ func init() {
 	SchemeBuilder.Register(&CareInstruction{}, &CareInstructionList{})
 }
 
-// ListShoots returns shoots matching the ShootSelector label selector.
+// ListShoots returns shoots matching the ShootSelector.LabelSelector.
 func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Client) (gardenerv1beta1.ShootList, error) {
 	shootList := gardenerv1beta1.ShootList{}
 	listOpts := []client.ListOption{client.InNamespace(c.Spec.GardenNamespace)}

@@ -196,7 +196,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(shootsReconciledCondition).ToNot(BeNil(), "ShootsReconciled condition should exist")
 				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionFalse), "should have ShootsReconciled condition set to false")
 
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(1), "should have total shoot count set to 1")
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(1), "should have total shoot count set to 1")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(0), "should have created clusters count set to 0")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0")
 				return true
@@ -222,7 +222,7 @@ var _ = Describe("CareInstruction Controller", func() {
 					test.ReconcileObject(careInstruction)
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed(), "should get CareInstruction resource")
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(1), "should have total shoot count set to 1")
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(1), "should have total shoot count set to 1")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(1), "should have created clusters count set to 1")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(1), "should have failed clusters count set to 1")
 				return true
@@ -251,7 +251,7 @@ var _ = Describe("CareInstruction Controller", func() {
 						g.Expect(condition.Status).To(Equal(metav1.ConditionTrue), "should have ShootsReconciled condition set to true")
 					}
 				}
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(1), "should have total shoot count set to 1")
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(1), "should have total shoot count set to 1")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(1), "should have created clusters count set to 1")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0")
 				return true
@@ -281,7 +281,7 @@ var _ = Describe("CareInstruction Controller", func() {
 						g.Expect(condition.Status).To(Equal(metav1.ConditionFalse), "should have ShootsReconciled condition set to false")
 					}
 				}
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(2), "should have total shoot count set to 2")
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(2), "should have total shoot count set to 2")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(1), "should have created clusters count set to 1")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0")
 				return true
@@ -368,13 +368,13 @@ var _ = Describe("CareInstruction Controller", func() {
 			Eventually(func(g Gomega) bool {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed(), "should get first CareInstruction resource")
 				g.Expect(careInstruction1.Status.Conditions).ToNot(BeEmpty(), "should have conditions in first CareInstruction status")
-				g.Expect(careInstruction1.Status.TotalShoots).To(Equal(2), "should have total shoot count set to 2 for first CareInstruction")
+				g.Expect(careInstruction1.Status.TotalTargetShoots).To(Equal(2), "should have total shoot count set to 2 for first CareInstruction")
 				g.Expect(careInstruction1.Status.CreatedClusters).To(Equal(0), "should have created clusters count set to 0 for first CareInstruction")
 				g.Expect(careInstruction1.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0 for first CareInstruction")
 
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed(), "should get second CareInstruction resource")
 				g.Expect(careInstruction2.Status.Conditions).ToNot(BeEmpty(), "should have conditions in second CareInstruction status")
-				g.Expect(careInstruction2.Status.TotalShoots).To(Equal(1), "should have total shoot count set to 1 for second CareInstruction")
+				g.Expect(careInstruction2.Status.TotalTargetShoots).To(Equal(1), "should have total shoot count set to 1 for second CareInstruction")
 				g.Expect(careInstruction2.Status.CreatedClusters).To(Equal(0), "should have created clusters count set to 0 for second CareInstruction")
 				g.Expect(careInstruction2.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0 for second CareInstruction")
 
@@ -449,13 +449,13 @@ var _ = Describe("CareInstruction Controller", func() {
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed(), "should get first CareInstruction resource")
 				g.Expect(careInstruction1.Status.Conditions).ToNot(BeEmpty(), "should have conditions in first CareInstruction status")
-				g.Expect(careInstruction1.Status.TotalShoots).To(Equal(2), "should have total shoot count set to 2 for first CareInstruction")
+				g.Expect(careInstruction1.Status.TotalTargetShoots).To(Equal(2), "should have total shoot count set to 2 for first CareInstruction")
 				g.Expect(careInstruction1.Status.CreatedClusters).To(Equal(2), "should have created clusters count set to 2 for first CareInstruction")
 				g.Expect(careInstruction1.Status.FailedClusters).To(Equal(1), "should have failed clusters count set to 0 for first CareInstruction")
 
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed(), "should get second CareInstruction resource")
 				g.Expect(careInstruction2.Status.Conditions).ToNot(BeEmpty(), "should have conditions in second CareInstruction status")
-				g.Expect(careInstruction2.Status.TotalShoots).To(Equal(1), "should have total shoot count set to 1 for second CareInstruction")
+				g.Expect(careInstruction2.Status.TotalTargetShoots).To(Equal(1), "should have total shoot count set to 1 for second CareInstruction")
 				g.Expect(careInstruction2.Status.CreatedClusters).To(Equal(1), "should have created clusters count set to 1 for second CareInstruction")
 				g.Expect(careInstruction2.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0 for second CareInstruction")
 
@@ -486,7 +486,7 @@ var _ = Describe("CareInstruction Controller", func() {
 						g.Expect(condition.Status).To(Equal(metav1.ConditionTrue), "should have Ready condition set to true")
 					}
 				}
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(0), "should have total shoot count set to 0")
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(0), "should have total shoot count set to 0")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(0), "should have created clusters count set to 0")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have failed clusters count set to 0")
 				return true
@@ -684,24 +684,24 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed(), "should get CareInstruction")
 
 				// Verify counts
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(3), "should have 3 total shoots")
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(3), "should have 3 total shoots")
 				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(3), "should have 3 created clusters")
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(1), "should have 1 failed cluster")
 
 				// Verify Clusters list is populated correctly
-				g.Expect(careInstruction.Status.Clusters).To(HaveLen(3), "should have 3 clusters in status")
+				g.Expect(careInstruction.Status.Shoots).To(HaveLen(3), "should have 3 clusters in status")
 
 				// Count ready and failed clusters
 				readyCount := 0
 				failedCount := 0
-				for _, clusterStatus := range careInstruction.Status.Clusters {
-					switch clusterStatus.Status {
-					case v1alpha1.ClusterStatusReady:
+				for _, shootStatus := range careInstruction.Status.Shoots {
+					switch shootStatus.Status {
+					case v1alpha1.ShootStatusOnboarded:
 						readyCount++
-						g.Expect([]string{shoot1.Name, shoot2.Name}).To(ContainElement(clusterStatus.Name), "ready cluster should be shoot1 or shoot2")
-					case v1alpha1.ClusterStatusFailed:
+						g.Expect([]string{shoot1.Name, shoot2.Name}).To(ContainElement(shootStatus.Name), "ready cluster should be shoot1 or shoot2")
+					case v1alpha1.ShootStatusFailed:
 						failedCount++
-						g.Expect(clusterStatus.Name).To(Equal(shoot3.Name), "failed cluster should be shoot3")
+						g.Expect(shootStatus.Name).To(Equal(shoot3.Name), "failed cluster should be shoot3")
 					}
 				}
 				g.Expect(readyCount).To(Equal(2), "should have 2 ready clusters")
@@ -729,12 +729,12 @@ var _ = Describe("CareInstruction Controller", func() {
 
 				// Verify all clusters are now ready
 				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0), "should have 0 failed clusters")
-				g.Expect(careInstruction.Status.Clusters).To(HaveLen(3), "should have 3 clusters in status")
+				g.Expect(careInstruction.Status.Shoots).To(HaveLen(3), "should have 3 clusters in status")
 
 				// Verify all clusters have Ready status
 				readyCount := 0
-				for _, clusterStatus := range careInstruction.Status.Clusters {
-					if clusterStatus.Status == v1alpha1.ClusterStatusReady {
+				for _, shootStatus := range careInstruction.Status.Shoots {
+					if shootStatus.Status == v1alpha1.ShootStatusOnboarded {
 						readyCount++
 					}
 				}
@@ -836,17 +836,17 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed(), "should get second CareInstruction")
 
 				// Should show count mismatch (1 shoot, 0 clusters owned by this CareInstruction)
-				g.Expect(careInstruction2.Status.TotalShoots).To(Equal(1), "should have 1 total shoot")
+				g.Expect(careInstruction2.Status.TotalTargetShoots).To(Equal(1), "should have 1 total shoot")
 				g.Expect(careInstruction2.Status.CreatedClusters).To(Equal(0), "should have 0 created clusters")
 
 				// Should have detected the conflict and added it to status
-				g.Expect(careInstruction2.Status.Clusters).To(HaveLen(1), "should have 1 cluster in status")
-				if len(careInstruction2.Status.Clusters) > 0 {
-					conflictCluster := careInstruction2.Status.Clusters[0]
-					g.Expect(conflictCluster.Name).To(Equal(shoot.Name), "cluster name should match shoot name")
-					g.Expect(conflictCluster.Status).To(Equal(v1alpha1.ClusterStatusReady), "cluster status should be Ready (reflecting actual cluster state)")
-					g.Expect(conflictCluster.Message).To(ContainSubstring("Cluster managed by different CareInstruction"), "message should indicate ownership conflict")
-					g.Expect(conflictCluster.Message).To(ContainSubstring(careInstruction1.Name), "message should mention the actual owner")
+				g.Expect(careInstruction2.Status.Shoots).To(HaveLen(1), "should have 1 cluster in status")
+				if len(careInstruction2.Status.Shoots) > 0 {
+					conflictShoot := careInstruction2.Status.Shoots[0]
+					g.Expect(conflictShoot.Name).To(Equal(shoot.Name), "cluster name should match shoot name")
+					g.Expect(conflictShoot.Status).To(Equal(v1alpha1.ShootStatusOnboarded), "cluster status should be Ready (reflecting actual cluster state)")
+					g.Expect(conflictShoot.Message).To(ContainSubstring("Cluster managed by different CareInstruction"), "message should indicate ownership conflict")
+					g.Expect(conflictShoot.Message).To(ContainSubstring(careInstruction1.Name), "message should mention the actual owner")
 				}
 
 				// ShootsReconciled condition should be false due to mismatch
@@ -864,7 +864,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed(), "should get first CareInstruction")
 
-				g.Expect(careInstruction1.Status.TotalShoots).To(Equal(1), "should have 1 total shoot")
+				g.Expect(careInstruction1.Status.TotalTargetShoots).To(Equal(1), "should have 1 total shoot")
 				g.Expect(careInstruction1.Status.CreatedClusters).To(Equal(1), "should have 1 created cluster")
 				g.Expect(careInstruction1.Status.FailedClusters).To(Equal(0), "should have 0 failed clusters")
 
@@ -895,11 +895,11 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed(), "should get second CareInstruction")
 
 				// Should still detect the conflict
-				g.Expect(careInstruction2.Status.Clusters).To(HaveLen(1), "should have 1 cluster in status")
-				if len(careInstruction2.Status.Clusters) > 0 {
-					conflictCluster := careInstruction2.Status.Clusters[0]
-					g.Expect(conflictCluster.Status).To(Equal(v1alpha1.ClusterStatusFailed), "cluster status should be Failed (reflecting actual cluster state)")
-					g.Expect(conflictCluster.Message).To(ContainSubstring("Cluster managed by different CareInstruction"), "message should indicate ownership conflict")
+				g.Expect(careInstruction2.Status.Shoots).To(HaveLen(1), "should have 1 cluster in status")
+				if len(careInstruction2.Status.Shoots) > 0 {
+					conflictShoot := careInstruction2.Status.Shoots[0]
+					g.Expect(conflictShoot.Status).To(Equal(v1alpha1.ShootStatusFailed), "cluster status should be Failed (reflecting actual cluster state)")
+					g.Expect(conflictShoot.Message).To(ContainSubstring("Cluster managed by different CareInstruction"), "message should indicate ownership conflict")
 				}
 
 				// Failed clusters should be incremented
@@ -1025,13 +1025,17 @@ var _ = Describe("CareInstruction Controller", func() {
 					test.ReconcileObject(careInstruction)
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(3))
-				g.Expect(careInstruction.Status.ExcludedShootCount).To(Equal(1))
-				g.Expect(careInstruction.Status.ExcludedShoots).To(HaveLen(1))
-				if len(careInstruction.Status.ExcludedShoots) > 0 {
-					g.Expect(careInstruction.Status.ExcludedShoots[0].Name).To(Equal("cel-shoot-failed"))
-					g.Expect(careInstruction.Status.ExcludedShoots[0].Reason).To(ContainSubstring("filtered out by CEL expression"))
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(3))
+				// Verify excluded shoot appears in Shoots list with Excluded status
+				excludedCount := 0
+				for _, s := range careInstruction.Status.Shoots {
+					if s.Status == v1alpha1.ShootStatusExcluded {
+						excludedCount++
+						g.Expect(s.Name).To(Equal("cel-shoot-failed"))
+						g.Expect(s.Message).To(ContainSubstring("filtered out by CEL expression"))
+					}
 				}
+				g.Expect(excludedCount).To(Equal(1))
 				return true
 			}).Should(BeTrue())
 
@@ -1111,13 +1115,17 @@ var _ = Describe("CareInstruction Controller", func() {
 					test.ReconcileObject(careInstruction)
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(1))
-				g.Expect(careInstruction.Status.ExcludedShootCount).To(Equal(1))
-				g.Expect(careInstruction.Status.ExcludedShoots).To(HaveLen(1))
-				if len(careInstruction.Status.ExcludedShoots) > 0 {
-					g.Expect(careInstruction.Status.ExcludedShoots[0].Name).To(Equal("cel-invalid-shoot"))
-					g.Expect(careInstruction.Status.ExcludedShoots[0].Reason).To(ContainSubstring("CEL evaluation failed"))
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(1))
+				// Verify excluded shoot appears in Shoots list with Excluded status
+				excludedCount := 0
+				for _, s := range careInstruction.Status.Shoots {
+					if s.Status == v1alpha1.ShootStatusExcluded {
+						excludedCount++
+						g.Expect(s.Name).To(Equal("cel-invalid-shoot"))
+						g.Expect(s.Message).To(ContainSubstring("CEL evaluation failed"))
+					}
 				}
+				g.Expect(excludedCount).To(Equal(1))
 				return true
 			}).Should(BeTrue())
 		})
@@ -1162,9 +1170,11 @@ var _ = Describe("CareInstruction Controller", func() {
 					test.ReconcileObject(careInstruction)
 				}()
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
-				g.Expect(careInstruction.Status.TotalShoots).To(Equal(2))
-				g.Expect(careInstruction.Status.ExcludedShootCount).To(Equal(0))
-				g.Expect(careInstruction.Status.ExcludedShoots).To(BeEmpty())
+				g.Expect(careInstruction.Status.TotalTargetShoots).To(Equal(2))
+				// No shoots should have Excluded status
+				for _, s := range careInstruction.Status.Shoots {
+					g.Expect(s.Status).ToNot(Equal(v1alpha1.ShootStatusExcluded))
+				}
 				return true
 			}).Should(BeTrue())
 		})
