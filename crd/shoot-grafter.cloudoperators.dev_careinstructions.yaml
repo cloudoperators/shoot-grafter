@@ -1,4 +1,5 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
+#
 # SPDX-License-Identifier: Apache-2.0
 
 ---
@@ -105,6 +106,11 @@ spec:
                 items:
                   type: string
                 type: array
+              shootFilter:
+                description: ShootFilter is a CEL expression for filtering shoots
+                  by status or other fields.
+                maxLength: 1024
+                type: string
               shootSelector:
                 description: ShootSelector is a label selector targeting shoots that
                   should be reconciled.
