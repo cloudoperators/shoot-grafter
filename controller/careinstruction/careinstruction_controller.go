@@ -362,6 +362,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		careInstruction.Status.TotalShoots = len(shoots.Items)
 	}
 
+	defer UpdateCareInstructionMetrics(careInstruction)
+
 	// List all clusters created by this CareInstruction
 	clusters, err := careInstruction.ListClusters(ctx, r.Client)
 	if client.IgnoreNotFound(err) != nil {
