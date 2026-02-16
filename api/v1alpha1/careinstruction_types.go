@@ -173,7 +173,7 @@ func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Cl
 	return shootList, nil
 }
 
-// MatchesCELFilter returns whether the shoot matches the CEL expression.
+// MatchesCELFilter returns whether the shoot matches the CEL expression. Returns true for empty CEL expression.
 func (c *CareInstruction) MatchesCELFilter(shoot *gardenerv1beta1.Shoot) (bool, error) {
 	if c.Spec.ShootSelector == nil || c.Spec.ShootSelector.Expression == "" {
 		return true, nil

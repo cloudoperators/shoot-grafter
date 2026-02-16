@@ -403,6 +403,25 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		existingClusterNames[cluster.Name] = true
 	}
 
+	for _, cluster := range clusters.Items {
+		shootStatus := v1alpha1.ShootStatus{
+			Name: cluster.Name,
+		}
+
+		if cluster.Status.IsReadyTrue() {
+			shootStatus.Status = v1alpha1.ShootStatusOnboarded
+		} else {
+			shootStatus.Status = v1alpha1.ShootStatusFailed
+			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
+			if readyCondition != nil && readyCondition.Message != "" {
+				shootStatus.Message = readyCondition.Message
+			}
+			careInstruction.Status.FailedClusters++
+		}
+
+		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
+	}
+
 	effectiveShootCount := len(includedShoots)
 	if effectiveShootCount != careInstruction.Status.CreatedClusters {
 		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
@@ -449,27 +468,6 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 
 		err := errors.New("shoot count and cluster count do not match")
 		return err
-	}
-
-	// Populate detailed shoot status list from clusters
-	for _, cluster := range clusters.Items {
-		shootStatus := v1alpha1.ShootStatus{
-			Name: cluster.Name,
-		}
-
-		if cluster.Status.IsReadyTrue() {
-			shootStatus.Status = v1alpha1.ShootStatusOnboarded
-		} else {
-			shootStatus.Status = v1alpha1.ShootStatusFailed
-			// Get the message from the Ready condition
-			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
-			if readyCondition != nil && readyCondition.Message != "" {
-				shootStatus.Message = readyCondition.Message
-			}
-			careInstruction.Status.FailedClusters++
-		}
-
-		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
 	}
 
 	if careInstruction.Status.FailedClusters > 0 {
