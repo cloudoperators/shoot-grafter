@@ -27,13 +27,9 @@ SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
 path = [
-  "api/v1alpha1/zz_generated.deepcopy.go",
-  "config/rbac/role.yaml",
-  "config/webhook/manifests.yaml",
-  "crd/shoot-grafter.cloudoperators.dev_careinstructions.yaml",
+  "*/zz_generated.deepcopy.go",
+  "crd/*",
 ]
-SPDX-FileCopyrightText = "SAP SE or an SAP affiliate company and Greenhouse contributors"
-SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
 path = [

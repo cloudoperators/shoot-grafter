@@ -238,11 +238,10 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("Secret for Shoot processed", "name", shoot.Name, "result", result)
 	}
 
-	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
-
 	// Configure OIDC authentication if AuthenticationConfigMapName is set
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
+		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
 		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
@@ -251,19 +250,28 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
 			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+	} else {
+		r.Info("No OIDC auth config found, skipping shoot auth config")
 	}
 
 	// Set up RBAC if enabled in the CareInstruction
 	if r.CareInstruction.Spec.EnableRBAC {
+		r.Info("RBAC config enabled, configuring RBAC on Shoot", "name", shoot.Name)
 		shootClient, err := getShootClusterClient(ctx, r.GardenClient, &shoot)
 		if err != nil {
 			r.Info("unable to get Shoot cluster client", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ShootClientFetchFailed",
 				fmt.Sprintf("Failed to get Shoot cluster client for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 			return ctrl.Result{}, err
+		} else {
+			r.Info("got shootClient for RBAC config, configuring RBAC on Shoot", "name", shoot.Name)
 		}
-		r.setRBAC(ctx, shootClient, shoot.GetName())
+		r.SetRBAC(ctx, shootClient, shoot.GetName())
+	} else {
+		r.Info("RBAC config disabled, skipping configuration of RBAC on Shoot", "name", shoot.Name)
 	}
+
+	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
 	return ctrl.Result{}, nil
 }
