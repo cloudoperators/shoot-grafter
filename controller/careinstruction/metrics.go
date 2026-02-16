@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package careinstruction
 
 import (
@@ -8,28 +11,28 @@ import (
 )
 
 var (
-	totalShootsGauge = prometheus.NewGaugeVec(
+	TotalShootsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_total_shoots",
 			Help: "Total number of shoots targeted by the CareInstruction",
 		},
 		[]string{"care_instruction", "namespace", "garden_namespace"},
 	)
-	createdClustersGauge = prometheus.NewGaugeVec(
+	CreatedClustersGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_created_clusters",
 			Help: "Number of clusters created by the CareInstruction",
 		},
 		[]string{"care_instruction", "namespace", "garden_namespace"},
 	)
-	failedClustersGauge = prometheus.NewGaugeVec(
+	FailedClustersGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_failed_clusters",
 			Help: "Number of clusters failed to be created by the CareInstruction",
 		},
 		[]string{"care_instruction", "namespace", "garden_namespace"},
 	)
-	clusterReadyGauge = prometheus.NewGaugeVec(
+	ClusterReadyGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_cluster_ready",
 			Help: "Is cluster created by the CareInstruction ready",
@@ -40,10 +43,10 @@ var (
 
 func init() {
 	crmetrics.Registry.MustRegister(
-		totalShootsGauge,
-		createdClustersGauge,
-		failedClustersGauge,
-		clusterReadyGauge,
+		TotalShootsGauge,
+		CreatedClustersGauge,
+		FailedClustersGauge,
+		ClusterReadyGauge,
 	)
 }
 
@@ -61,7 +64,7 @@ func updateTotalShootsMetric(careInstruction *v1alpha1.CareInstruction) {
 		"garden_namespace": careInstruction.Spec.GardenNamespace,
 	}
 	totalShoots := careInstruction.Status.TotalShoots
-	totalShootsGauge.With(metricLabels).Set(float64(totalShoots))
+	TotalShootsGauge.With(metricLabels).Set(float64(totalShoots))
 }
 
 func updateCreatedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
@@ -71,7 +74,7 @@ func updateCreatedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 		"garden_namespace": careInstruction.Spec.GardenNamespace,
 	}
 	createdCount := careInstruction.Status.CreatedClusters
-	createdClustersGauge.With(metricLabels).Set(float64(createdCount))
+	CreatedClustersGauge.With(metricLabels).Set(float64(createdCount))
 }
 
 func updateFailedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
@@ -81,7 +84,7 @@ func updateFailedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 		"garden_namespace": careInstruction.Spec.GardenNamespace,
 	}
 	failedCount := careInstruction.Status.FailedClusters
-	failedClustersGauge.With(metricLabels).Set(float64(failedCount))
+	FailedClustersGauge.With(metricLabels).Set(float64(failedCount))
 }
 
 func updateReadyClustersMetrics(careInstruction *v1alpha1.CareInstruction) {
@@ -93,9 +96,9 @@ func updateReadyClustersMetrics(careInstruction *v1alpha1.CareInstruction) {
 			"cluster_name":     cs.Name,
 		}
 		if cs.Status == v1alpha1.ClusterStatusReady {
-			clusterReadyGauge.With(metricLabels).Set(float64(1))
+			ClusterReadyGauge.With(metricLabels).Set(float64(1))
 		} else {
-			clusterReadyGauge.With(metricLabels).Set(float64(0))
+			ClusterReadyGauge.With(metricLabels).Set(float64(0))
 		}
 	}
 }
