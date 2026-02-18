@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
@@ -52,10 +53,21 @@ func (r *ShootController) emitEvent(object client.Object, eventType, reason, mes
 }
 
 func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
-	shootSelectorPredicate, err := predicate.LabelSelectorPredicate(*r.CareInstruction.Spec.ShootSelector)
+	predicates := []predicate.Predicate{}
 
-	if err != nil {
-		return err
+	if r.CareInstruction.Spec.ShootSelector != nil && r.CareInstruction.Spec.ShootSelector.LabelSelector != nil {
+		labelPredicate, err := predicate.LabelSelectorPredicate(*r.CareInstruction.Spec.ShootSelector.LabelSelector)
+		if err != nil {
+			return err
+		}
+		predicates = append(predicates, labelPredicate)
+	}
+
+	if r.CareInstruction.Spec.ShootSelector != nil && r.CareInstruction.Spec.ShootSelector.Expression != "" {
+		if r.CareInstruction.Spec.ShootSelector.LabelSelector == nil {
+			r.Info("CEL expression without label selector, all shoots in namespace will be watched")
+		}
+		predicates = append(predicates, r.newCELPredicate())
 	}
 
 	// Log missing event recorder
@@ -66,8 +78,28 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 	// Setup the shoot controller with the manager
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(r.Name).
-		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(shootSelectorPredicate)).
+		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
 		Complete(r)
+}
+
+func (r *ShootController) newCELPredicate() predicate.Predicate {
+	celFilter := predicate.NewPredicateFuncs(func(o client.Object) bool {
+		shoot, ok := o.(*gardenerv1beta1.Shoot)
+		return ok && r.matchesCEL(shoot)
+	})
+	celFilter.DeleteFunc = func(_ event.DeleteEvent) bool { return true }
+	return celFilter
+}
+
+func (r *ShootController) matchesCEL(shoot *gardenerv1beta1.Shoot) bool {
+	matches, err := r.CareInstruction.MatchesCELFilter(shoot)
+	if err != nil {
+		r.Info("CEL filter evaluation failed", "shoot", shoot.Name, "error", err.Error())
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CELFilterError",
+			fmt.Sprintf("CEL filter evaluation failed for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
+		return false
+	}
+	return matches
 }
 
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -98,16 +130,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				fmt.Sprintf("Shoot %s/%s was deleted", req.Namespace, req.Name))
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	matches, err := r.CareInstruction.MatchesCELFilter(&shoot)
-	if err != nil {
-		r.Info("CEL filter evaluation failed, skipping shoot", "shoot", shoot.Name, "error", err.Error())
-		return ctrl.Result{}, nil
-	}
-	if !matches {
-		r.Info("shoot filtered out by CEL", "shoot", shoot.Name)
-		return ctrl.Result{}, nil
 	}
 
 	apiServerURL := ""

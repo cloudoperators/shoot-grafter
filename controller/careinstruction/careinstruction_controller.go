@@ -25,6 +25,7 @@ import (
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -340,10 +341,10 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 // reconcileShootsNClusters - reconciles the clusters created and owned by this CareInstruction.
 func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Reconciling shoots and clusters for CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
-	careInstruction.Status.TotalShoots = 0
+	careInstruction.Status.TotalTargetShoots = 0
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
-	careInstruction.Status.Clusters = []v1alpha1.ClusterStatus{}
+	careInstruction.Status.Shoots = []v1alpha1.ShootStatus{}
 
 	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
@@ -351,15 +352,38 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	gardenClient := r.gardens[gardenKey].gardenClient
 	r.gardensMu.RUnlock()
 
-	// List all shoots targeted by the given CareInstruction
+	// List all shoots targeted by this CareInstruction
 	shoots, err := careInstruction.ListShoots(ctx, *gardenClient)
 	if client.IgnoreNotFound(err) != nil {
 		return err
 	}
 	if apierrors.IsNotFound(err) {
-		careInstruction.Status.TotalShoots = 0
+		careInstruction.Status.TotalTargetShoots = 0
 	} else {
-		careInstruction.Status.TotalShoots = len(shoots.Items)
+		careInstruction.Status.TotalTargetShoots = len(shoots.Items)
+	}
+
+	var includedShoots []gardenerv1beta1.Shoot
+	for _, shoot := range shoots.Items {
+		matches, err := careInstruction.MatchesCELFilter(&shoot)
+		switch {
+		case err != nil:
+			r.Info("CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
+			careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, v1alpha1.ShootStatus{
+				Name:    shoot.Name,
+				Status:  v1alpha1.ShootStatusExcluded,
+				Message: "CEL evaluation failed: " + err.Error(),
+			})
+		case !matches:
+			r.Info("Shoot filtered out by CEL expression", "shoot", shoot.Name)
+			careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, v1alpha1.ShootStatus{
+				Name:    shoot.Name,
+				Status:  v1alpha1.ShootStatusExcluded,
+				Message: "filtered out by CEL expression",
+			})
+		default:
+			includedShoots = append(includedShoots, shoot)
+		}
 	}
 
 	// List all clusters created by this CareInstruction
@@ -373,23 +397,41 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		careInstruction.Status.CreatedClusters = len(clusters.Items)
 	}
 
-	// Check if created TotalCreatedClusters match TotalShoots
-	if careInstruction.Status.TotalShoots != careInstruction.Status.CreatedClusters {
-		// Mismatch detected - check for ownership conflicts
-		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
-			"totalShoots", careInstruction.Status.TotalShoots,
-			"createdClusters", careInstruction.Status.CreatedClusters)
+	// Build a map of existing cluster names owned by this CareInstruction
+	existingClusterNames := make(map[string]bool)
+	for _, cluster := range clusters.Items {
+		existingClusterNames[cluster.Name] = true
+	}
 
-		// Build a map of existing cluster names owned by this CareInstruction
-		existingClusterNames := make(map[string]bool)
-		for _, cluster := range clusters.Items {
-			existingClusterNames[cluster.Name] = true
+	for _, cluster := range clusters.Items {
+		shootStatus := v1alpha1.ShootStatus{
+			Name: cluster.Name,
 		}
 
-		// Check shoots that don't have a corresponding cluster in our list
-		for _, shoot := range shoots.Items {
+		if cluster.Status.IsReadyTrue() {
+			shootStatus.Status = v1alpha1.ShootStatusOnboarded
+		} else {
+			shootStatus.Status = v1alpha1.ShootStatusFailed
+			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
+			if readyCondition != nil && readyCondition.Message != "" {
+				shootStatus.Message = readyCondition.Message
+			}
+			careInstruction.Status.FailedClusters++
+		}
+
+		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
+	}
+
+	effectiveShootCount := len(includedShoots)
+	if effectiveShootCount != careInstruction.Status.CreatedClusters {
+		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
+			"effectiveShoots", effectiveShootCount,
+			"createdClusters", careInstruction.Status.CreatedClusters)
+
+		// Only check ownership conflicts for shoots that pass all filters.
+		// Filtered-out shoots should not have new clusters created.
+		for _, shoot := range includedShoots {
 			if existingClusterNames[shoot.Name] {
-				// This shoot has a cluster owned by us, skip
 				continue
 			}
 
@@ -404,20 +446,19 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 						"managedBy", ownerLabel,
 						"attemptedBy", careInstruction.Name)
 
-					// Determine cluster status based on actual cluster ready state
-					clusterStatus := v1alpha1.ClusterStatus{
+					shootStatus := v1alpha1.ShootStatus{
 						Name:    shoot.Name,
 						Message: "Cluster managed by different CareInstruction: " + ownerLabel,
 					}
 
 					if existingCluster.Status.IsReadyTrue() {
-						clusterStatus.Status = v1alpha1.ClusterStatusReady
+						shootStatus.Status = v1alpha1.ShootStatusOnboarded
 					} else {
-						clusterStatus.Status = v1alpha1.ClusterStatusFailed
+						shootStatus.Status = v1alpha1.ShootStatusFailed
 						careInstruction.Status.FailedClusters++
 					}
 
-					careInstruction.Status.Clusters = append(careInstruction.Status.Clusters, clusterStatus)
+					careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
 				}
 			} else if !apierrors.IsNotFound(err) {
 				// Some other error occurred
@@ -425,29 +466,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			}
 		}
 
-		err := errors.New("total shoots and created clusters do not match")
+		err := errors.New("shoot count and cluster count do not match")
 		return err
-	}
-
-	// Populate detailed cluster status list
-	for _, cluster := range clusters.Items {
-		clusterStatus := v1alpha1.ClusterStatus{
-			Name: cluster.Name,
-		}
-
-		if cluster.Status.IsReadyTrue() {
-			clusterStatus.Status = v1alpha1.ClusterStatusReady
-		} else {
-			clusterStatus.Status = v1alpha1.ClusterStatusFailed
-			// Get the message from the Ready condition
-			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
-			if readyCondition != nil && readyCondition.Message != "" {
-				clusterStatus.Message = readyCondition.Message
-			}
-			careInstruction.Status.FailedClusters++
-		}
-
-		careInstruction.Status.Clusters = append(careInstruction.Status.Clusters, clusterStatus)
 	}
 
 	if careInstruction.Status.FailedClusters > 0 {

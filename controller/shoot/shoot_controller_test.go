@@ -204,9 +204,11 @@ var _ = Describe("Shoot Controller", func() {
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"foo": "bar",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"foo": "bar",
+							},
 						},
 					},
 					PropagateLabels: []string{
@@ -707,7 +709,9 @@ var _ = Describe("Shoot Controller", func() {
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{},
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{},
+					},
 					PropagateLabels: []string{
 						"foo",
 						"baz",
@@ -790,9 +794,11 @@ var _ = Describe("Shoot Controller", func() {
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "events",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "events",
+							},
 						},
 					},
 				},
@@ -1144,9 +1150,11 @@ var _ = Describe("Shoot Controller", func() {
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "oidc",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "oidc",
+							},
 						},
 					},
 					AuthenticationConfigMapName: "greenhouse-auth-config",
@@ -1655,9 +1663,11 @@ jwt:
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "label",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"test": "label",
+							},
 						},
 					},
 					AuthenticationConfigMapName: "greenhouse-auth-config-no-label",
@@ -1741,7 +1751,7 @@ jwt:
 		})
 	})
 
-	When("using ShootFilter with CEL expression", func() {
+	When("using ShootSelector.Expression with CEL expression", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1749,10 +1759,12 @@ jwt:
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"test": "cel"},
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "cel"},
+						},
+						Expression: `object.status.lastOperation.state == "Succeeded"`,
 					},
-					ShootFilter: `object.status.lastOperation.state == "Succeeded"`,
 				},
 			}
 		})
@@ -1803,7 +1815,7 @@ jwt:
 		})
 	})
 
-	When("using ShootFilter with invalid CEL expression", func() {
+	When("using ShootSelector.Expression with invalid CEL expression", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1811,10 +1823,12 @@ jwt:
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"test": "invalid-cel"},
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "invalid-cel"},
+						},
+						Expression: `invalid syntax here`,
 					},
-					ShootFilter: `invalid syntax here`,
 				},
 			}
 		})
@@ -1855,7 +1869,7 @@ jwt:
 		})
 	})
 
-	When("using ShootFilter with CEL expression returning non-bool", func() {
+	When("using ShootSelector.Expression with CEL expression returning non-bool", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1863,10 +1877,12 @@ jwt:
 					Namespace: "default",
 				},
 				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"test": "nonbool-cel"},
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "nonbool-cel"},
+						},
+						Expression: `object.metadata.name`,
 					},
-					ShootFilter: `object.metadata.name`,
 				},
 			}
 		})

@@ -20,7 +20,7 @@ This project is part of the [NeoNephos Foundation](https://neonephos.org/).
 
 shoot-grafter continuously monitors Garden clusters for Shoots matching specific criteria and automatically:
 
-1. **Discovers Shoots**: Watches for Gardener Shoot resources in specified namespaces based on label selectors
+1. **Discovers Shoots**: Watches for Gardener Shoot resources in specified namespaces based on label selectors and CEL expressions
 2. **Extracts cluster credentials**: Retrieves API server URLs and CA certificates from Shoot resources
 3. **Creates Greenhouse Clusters**: Automatically registers discovered Shoots as Greenhouse Cluster resources
 4. **Propagates labels**: Transfers specified labels from Shoots to Greenhouse Clusters for consistent organization
@@ -56,8 +56,8 @@ graph LR
             
             subgraph CareInstructions[" "]
                 CITitle["CareInstructions"]
-                CI1["prod-shoots<br/>gardenNamespace: garden--production<br/>shootSelector: env=prod"]
-                CI2["dev-shoots<br/>gardenNamespace: garden--development<br/>shootSelector: env=dev"]
+                CI1["prod-shoots<br/>gardenNamespace: garden--production<br/>shootSelector.labelSelector: env=prod"]
+                CI2["dev-shoots<br/>gardenNamespace: garden--development<br/>shootSelector.labelSelector: env=dev"]
             end
             
             subgraph DynamicControllers[" "]
@@ -133,7 +133,7 @@ The `CareInstruction` is the primary Custom Resource Definition (CRD) that confi
 
 - Defines which Garden cluster to monitor (via kubeconfig secret or Greenhouse Cluster reference)
 - Specifies which namespace to watch for Shoots
-- Declares label selectors to filter which Shoots to onboard
+- Declares label selectors and CEL expressions to filter which Shoots to onboard
 - Configures label propagation and additional metadata
 - Manages the lifecycle of dynamically created Shoot controllers
 
@@ -172,11 +172,13 @@ spec:
   # Namespace in the Garden cluster to watch
   gardenNamespace: garden-production
   
-  # Label selector for Shoots to onboard
+  # Label selector and CEL expression for Shoots to onboard
   shootSelector:
-    matchLabels:
-      environment: production
-      team: platform
+    labelSelector:
+      matchLabels:
+        environment: production
+        team: platform
+    expression: 'object.status.lastOperation.state == "Succeeded"'
   
   # Labels to propagate from Shoot to Greenhouse Cluster
   propagateLabels:
@@ -201,7 +203,9 @@ spec:
 | `gardenClusterName` | string | No*| Name of the Greenhouse Cluster resource representing the Garden cluster |
 | `gardenClusterKubeConfigSecretName` | SecretKeyReference | No* | Reference to a secret containing the kubeconfig for the Garden cluster |
 | `gardenNamespace` | string | Yes | Namespace in the Garden cluster where Shoots are located |
-| `shootSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard (if omitted, all Shoots in namespace are selected). |
+| `shootSelector` | ShootSelector | No | Combines label-based and CEL expression-based filtering (if omitted, all Shoots in namespace are selected) |
+| `shootSelector.labelSelector` | LabelSelector | No | Label selector to filter which Shoots to onboard |
+| `shootSelector.expression` | string | No | CEL expression for filtering shoots by status or other fields (max 1024 chars). The shoot object is available as `object` |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
 | `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)|
@@ -239,8 +243,13 @@ status:
     - name: shoot-cluster-3
       status: Failed
       message: couldn't get current server API group list: the server has asked for the client to provide credentials
-  totalShootCount: 3
-  createdClusters: 2
+  totalShootCount: 4
+  excludedShootCount: 1
+  effectiveShootCount: 3
+  excludedShoots:
+    - name: shoot-cluster-4
+      reason: "filtered out by CEL expression"
+  createdClusters: 3
   failedClusters: 1
 ```
 
@@ -251,7 +260,10 @@ status:
 - `ShootControllerStarted`: Shows if the dynamic Shoot controller has been started
 - `ShootsReconciled`: Reports whether all targeted Shoots have been successfully onboarded
 - `clusters`: Detailed list of all clusters managed by this CareInstruction with their individual status (Ready/Failed) and optional message
-- `totalShootCount`: Total number of Shoots matched by the selector
+- `totalShootCount`: Total number of Shoots matching the label selector (before CEL filtering)
+- `excludedShootCount`: Number of Shoots excluded by the CEL expression
+- `effectiveShootCount`: Number of Shoots after CEL filtering (`totalShootCount - excludedShootCount`)
+- `excludedShoots`: List of excluded Shoots with names and reasons
 - `createdClusters`: Number of Greenhouse Clusters created by this CareInstruction
 - `failedClusters`: Number of Greenhouse Clusters that are not ready
 
@@ -282,8 +294,9 @@ spec:
   gardenClusterName: prod-garden
   gardenNamespace: garden--production
   shootSelector:
-    matchLabels:
-      environment: production
+    labelSelector:
+      matchLabels:
+        environment: production
   propagateLabels:
     - metadata.greenhouse.sap/region
     - greenhouse.sap/owned-by
@@ -304,16 +317,18 @@ spec:
   gardenClusterName: my-garden
   gardenNamespace: garden--myproject
   shootSelector:
-    matchLabels:
-      shoot.gardener.cloud/status: "healthy"
-    matchExpressions:
-      - key: environment
-        operator: In
-        values:
-          - staging
-          - production
-      - key: owned-by
-        operator: Exists
+    labelSelector:
+      matchLabels:
+        shoot.gardener.cloud/status: "healthy"
+      matchExpressions:
+        - key: environment
+          operator: In
+          values:
+            - staging
+            - production
+        - key: owned-by
+          operator: Exists
+    expression: 'object.status.lastOperation.state == "Succeeded"'
   propagateLabels:
     - metadata.greenhouse.sap/region
     - metadata.greenhouse.sap/environment
@@ -336,8 +351,9 @@ spec:
   gardenClusterName: prod-garden
   gardenNamespace: garden--production
   shootSelector:
-    matchLabels:
-      enabled-oidc: "true"
+    labelSelector:
+      matchLabels:
+        enabled-oidc: "true"
   authenticationConfigMapRef: greenhouse-oidc-config
   propagateLabels:
     - metadata.greenhouse.sap/environment
@@ -421,6 +437,7 @@ shoot-grafter emits the following events during Shoot reconciliation:
 | `OIDCConfigurationFailed` | Failed to configure OIDC authentication on the Shoot | Verify AuthenticationConfigMap exists and contains valid configuration; check Garden cluster connectivity and permissions |
 | `ShootClientFetchFailed` | Failed to get Shoot cluster client | Verify Shoot is accessible and kubeconfig is valid; check network connectivity to Shoot cluster |
 | `RBACCreationFailed` | Failed to create RBAC ClusterRoleBinding on the Shoot | Check connectivity to Shoot cluster; verify service account has sufficient permissions |
+| `CELFilterError` | CEL expression evaluation failed for a Shoot | Verify the CEL expression syntax in `shootSelector.expression` |
 
 ### Event Retention
 
