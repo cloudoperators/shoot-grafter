@@ -38,6 +38,7 @@ githubWorkflow:
     platforms: "linux/amd64,linux/arm64"
     tagStrategy:
       - latest
+      - semver
       - sha
 
 renovate:
@@ -46,12 +47,16 @@ renovate:
     - "@cloudoperators/greenhouse-backend"
 
 reuse:
-  enabled: false
+  enabled: true
+  annotations:
+  - paths:
+      - '*/zz_generated.deepcopy.go'
+      - 'crd/*'
 
 license:
   addHeaders: true
   checkDependencies: true
-  copyright: '2026 SAP SE or an SAP affiliate company and Greenhouse contributors'
+  copyright: 'SAP SE or an SAP affiliate company and Greenhouse contributors'
   spdx: Apache-2.0
 
 typos:

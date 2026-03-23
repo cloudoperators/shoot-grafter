@@ -12,6 +12,7 @@ mkShell {
     go_1_25
     gotools # goimports
     renovate
+    reuse
     typos
     # keep this line if you use bash
     bashInteractive

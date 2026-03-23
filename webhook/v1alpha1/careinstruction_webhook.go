@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+// SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package v1alpha1
@@ -9,7 +9,6 @@ import (
 
 	"shoot-grafter/api/v1alpha1"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -34,7 +33,7 @@ func (r *CareInstructionWebhook) Default(ctx context.Context, obj runtime.Object
 	}
 
 	if careInstruction.Spec.ShootSelector == nil {
-		careInstruction.Spec.ShootSelector = &metav1.LabelSelector{}
+		careInstruction.Spec.ShootSelector = &v1alpha1.ShootSelector{}
 	}
 
 	return nil

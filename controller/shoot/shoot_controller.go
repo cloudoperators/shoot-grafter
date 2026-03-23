@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+// SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package shoot
@@ -14,6 +14,7 @@ import (
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	"github.com/cloudoperators/greenhouse/pkg/lifecycle"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
@@ -51,10 +53,21 @@ func (r *ShootController) emitEvent(object client.Object, eventType, reason, mes
 }
 
 func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
-	shootSelectorPredicate, err := predicate.LabelSelectorPredicate(*r.CareInstruction.Spec.ShootSelector)
+	predicates := []predicate.Predicate{}
 
-	if err != nil {
-		return err
+	if r.CareInstruction.Spec.ShootSelector != nil && r.CareInstruction.Spec.ShootSelector.LabelSelector != nil {
+		labelPredicate, err := predicate.LabelSelectorPredicate(*r.CareInstruction.Spec.ShootSelector.LabelSelector)
+		if err != nil {
+			return err
+		}
+		predicates = append(predicates, labelPredicate)
+	}
+
+	if r.CareInstruction.Spec.ShootSelector != nil && r.CareInstruction.Spec.ShootSelector.Expression != "" {
+		if r.CareInstruction.Spec.ShootSelector.LabelSelector == nil {
+			r.Info("CEL expression without label selector, all shoots in namespace will be watched")
+		}
+		predicates = append(predicates, r.newCELPredicate())
 	}
 
 	// Log missing event recorder
@@ -65,8 +78,28 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 	// Setup the shoot controller with the manager
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(r.Name).
-		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(shootSelectorPredicate)).
+		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
 		Complete(r)
+}
+
+func (r *ShootController) newCELPredicate() predicate.Predicate {
+	celFilter := predicate.NewPredicateFuncs(func(o client.Object) bool {
+		shoot, ok := o.(*gardenerv1beta1.Shoot)
+		return ok && r.matchesCEL(shoot)
+	})
+	celFilter.DeleteFunc = func(_ event.DeleteEvent) bool { return true }
+	return celFilter
+}
+
+func (r *ShootController) matchesCEL(shoot *gardenerv1beta1.Shoot) bool {
+	matches, err := r.CareInstruction.MatchesCELFilter(shoot)
+	if err != nil {
+		r.Info("CEL filter evaluation failed", "shoot", shoot.Name, "error", err.Error())
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "CELFilterError",
+			fmt.Sprintf("CEL filter evaluation failed for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
+		return false
+	}
+	return matches
 }
 
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -99,16 +132,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	matches, err := r.CareInstruction.MatchesCELFilter(&shoot)
-	if err != nil {
-		r.Info("CEL filter evaluation failed, skipping shoot", "shoot", shoot.Name, "error", err.Error())
-		return ctrl.Result{}, nil
-	}
-	if !matches {
-		r.Info("shoot filtered out by CEL", "shoot", shoot.Name)
-		return ctrl.Result{}, nil
-	}
-
 	apiServerURL := ""
 	// ApiServerURL is the Advertised Address with .name="external".
 	if shoot.Status.AdvertisedAddresses != nil {
@@ -125,33 +148,33 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// Initialize labels and label propagation with the CareInstruction labels
-	labels := map[string]string{
-		v1alpha1.CareInstructionLabel: r.CareInstruction.Name,
+	// Specify which labels to propagate from the Shoot to the Secret - LabelPropagator needs to have the labels set on the source object.
+	// TODO: change when LabelPropagator is extended to accommodate this scenario.
+	if shoot.Annotations == nil {
+		shoot.Annotations = make(map[string]string)
 	}
-	var labelPropagateBuilder strings.Builder
-	labelPropagateBuilder.WriteString(v1alpha1.CareInstructionLabel)
-	labelPropagateBuilder.WriteString(",")
-	// get labels specified via TransportLabels on the CareInstruction from the shoot
-	for _, v := range r.CareInstruction.Spec.PropagateLabels {
-		if labelValue, ok := shoot.Labels[v]; ok {
-			labels[v] = labelValue
-			labelPropagateBuilder.WriteString(v)
-			labelPropagateBuilder.WriteString(",")
-		}
-	}
-	// get additional labels specified via AdditionalLabels on the CareInstruction
+	shoot.Annotations[lifecycle.PropagateLabelsAnnotation] = strings.Join(r.CareInstruction.Spec.PropagateLabels, ",")
+
+	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
+	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
+
+	// Initialize secret labels based on CareInstruction
+	secretLabels := make(map[string]string)
+
+	// Get additional labels to set on the Secret
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
 		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
-			labels[k] = v
-			labelPropagateBuilder.WriteString(k)
-			labelPropagateBuilder.WriteString(",")
+			secretLabels[k] = v
+			labelKeysToPropagate = append(labelKeysToPropagate, k)
 		}
 	}
-	labelPropagateString := labelPropagateBuilder.String()
 
-	annotations := map[string]string{
-		"greenhouse.sap/propagate-labels":           labelPropagateString,
+	// Set the identifying label
+	secretLabels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
+	labelKeysToPropagate = append(labelKeysToPropagate, v1alpha1.CareInstructionLabel)
+
+	secretAnnotations := map[string]string{
+		"greenhouse.sap/propagate-labels":           strings.Join(labelKeysToPropagate, ","),
 		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
 	}
 
@@ -180,8 +203,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        shoot.Name,
 			Namespace:   r.CareInstruction.Namespace,
-			Annotations: annotations,
-			Labels:      labels,
+			Annotations: secretAnnotations,
+			Labels:      secretLabels,
 		},
 		Data: map[string][]byte{
 			"ca.crt": caDataBase64Enc,
@@ -197,12 +220,15 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
 		}
-		maps.Copy(secret.Annotations, annotations)
+		maps.Copy(secret.Annotations, secretAnnotations)
 		// Merge labels - preserve existing ones and add/update ours
 		if secret.Labels == nil {
 			secret.Labels = make(map[string]string)
 		}
-		maps.Copy(secret.Labels, labels)
+		maps.Copy(secret.Labels, secretLabels)
+
+		// Transport Shoot labels to the Secret
+		secret = (lifecycle.NewPropagator(&shoot, secret).Apply()).(*corev1.Secret)
 		return nil
 	})
 	if err != nil {
@@ -234,11 +260,10 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("Secret for Shoot processed", "name", shoot.Name, "result", result)
 	}
 
-	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
-
 	// Configure OIDC authentication if AuthenticationConfigMapName is set
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
+		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
 		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
@@ -247,19 +272,28 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
 			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+	} else {
+		r.Info("No OIDC auth config found, skipping shoot auth config")
 	}
 
 	// Set up RBAC if enabled in the CareInstruction
 	if r.CareInstruction.Spec.EnableRBAC {
+		r.Info("RBAC config enabled, configuring RBAC on Shoot", "name", shoot.Name)
 		shootClient, err := getShootClusterClient(ctx, r.GardenClient, &shoot)
 		if err != nil {
 			r.Info("unable to get Shoot cluster client", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ShootClientFetchFailed",
 				fmt.Sprintf("Failed to get Shoot cluster client for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 			return ctrl.Result{}, err
+		} else {
+			r.Info("got shootClient for RBAC config, configuring RBAC on Shoot", "name", shoot.Name)
 		}
-		r.setRBAC(ctx, shootClient, shoot.GetName())
+		r.SetRBAC(ctx, shootClient, shoot.GetName())
+	} else {
+		r.Info("RBAC config disabled, skipping configuration of RBAC on Shoot", "name", shoot.Name)
 	}
+
+	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
 	return ctrl.Result{}, nil
 }

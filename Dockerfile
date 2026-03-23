@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Build the manager binary
 FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.25.1 AS builder
 
