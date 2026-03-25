@@ -8,5 +8,4 @@ Ded = "Ded"
 [files]
 extend-exclude = [
   "go.mod",
-  "vendor/",
 ]
