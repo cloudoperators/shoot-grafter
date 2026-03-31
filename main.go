@@ -21,11 +21,17 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+)
+
+const (
+	flagMetricsBindAddress = "metrics-bind-address"
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	scheme      = runtime.NewScheme()
+	setupLog    = ctrl.Log.WithName("setup")
+	metricsAddr string
 )
 
 func init() {
@@ -42,6 +48,7 @@ func main() {
 		TimeEncoder: zapcore.RFC3339TimeEncoder,
 	}
 	flag.StringVar(&kubecontext, "kubecontext", "", "The context to use from the kubeconfig (defaults to current-context)")
+	flag.StringVar(&metricsAddr, flagMetricsBindAddress, ":8080", "The address the metrics endpoint binds to")
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -49,7 +56,10 @@ func main() {
 	config := getKubeconfigOrDie(kubecontext)
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
-		Scheme:         scheme,
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
 		LeaderElection: false,
 	})
 	if err != nil {
