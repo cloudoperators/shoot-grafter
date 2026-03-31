@@ -5,6 +5,7 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -12,7 +13,6 @@ import (
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -38,12 +38,27 @@ const (
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
 	AuthConfigMapLabel = "shoot-grafter.cloudoperators/authconfigmap"
 
-	// ClusterStatusReady indicates the cluster is ready.
-	ClusterStatusReady = "Ready"
+	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
+	ShootStatusOnboarded = "Onboarded"
 
-	// ClusterStatusFailed indicates the cluster has failed.
-	ClusterStatusFailed = "Failed"
+	// ShootStatusFailed indicates the shoot's Greenhouse Cluster has failed.
+	ShootStatusFailed = "Failed"
+
+	// ShootStatusExcluded indicates the shoot was excluded by the ShootSelector filter criteria.
+	ShootStatusExcluded = "Excluded"
 )
+
+// ShootSelector combines label-based and CEL expression-based filtering for shoots.
+type ShootSelector struct {
+	// LabelSelector is a label selector targeting shoots that should be reconciled.
+	// +optional
+	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
+
+	// Expression is a CEL expression for filtering shoots by status or other fields.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Expression string `json:"expression,omitempty"`
+}
 
 // CareInstructionSpec holds the configuration for how to onboard Gardener shoots to Greenhouse.
 type CareInstructionSpec struct {
@@ -61,13 +76,9 @@ type CareInstructionSpec struct {
 	// GardenNamespace is the namespace in which Greenhouse will look for shoots on the seed cluster.
 	GardenNamespace string `json:"gardenNamespace"`
 
-	// ShootSelector is a label selector targeting shoots that should be reconciled.
-	ShootSelector *metav1.LabelSelector `json:"shootSelector,omitempty"`
-
-	// ShootFilter is a CEL expression for filtering shoots by status or other fields.
+	// ShootSelector combines label-based and CEL expression-based filtering for shoots.
 	// +optional
-	// +kubebuilder:validation:MaxLength=1024
-	ShootFilter string `json:"shootFilter,omitempty"`
+	ShootSelector *ShootSelector `json:"shootSelector,omitempty"`
 
 	// PropagateLabels is a list of labels that will be propagated from shoot to Greenhouse Cluster.
 	PropagateLabels []string `json:"propagateLabels,omitempty"`
@@ -86,16 +97,16 @@ type CareInstructionSpec struct {
 	AuthenticationConfigMapName string `json:"authenticationConfigMapName,omitempty"`
 }
 
-// ClusterStatus represents the status of a single cluster managed by this CareInstruction.
-type ClusterStatus struct {
-	// Name of the cluster.
+// ShootStatus represents the status of a single shoot targeted by this CareInstruction.
+type ShootStatus struct {
+	// Name of the shoot.
 	Name string `json:"name"`
 
-	// Status represents the current state of the cluster (Ready or Failed).
-	// +kubebuilder:validation:Enum=Ready;Failed
+	// Status represents the current state of the shoot (Onboarded, Failed or Excluded).
+	// +kubebuilder:validation:Enum=Onboarded;Failed;Excluded
 	Status string `json:"status"`
 
-	// Message provides additional information about the cluster status when Failed.
+	// Message provides additional information about the shoot status.
 	Message string `json:"message,omitempty"`
 }
 
@@ -104,11 +115,11 @@ type CareInstructionStatus struct {
 	// StatusConditions represent the latest available observations of the CareInstruction's current state.
 	greenhousemetav1alpha1.StatusConditions `json:"statusConditions,omitempty"`
 
-	// Clusters is a list of clusters managed by this CareInstruction with their detailed status.
-	Clusters []ClusterStatus `json:"clusters,omitempty"`
+	// Shoots is a list of shoots targeted by this CareInstruction with their detailed status.
+	Shoots []ShootStatus `json:"shoots,omitempty"`
 
-	// TotalShootCount is the total number of shoots targeted by this CareInstruction.
-	TotalShoots int `json:"totalShootCount,omitempty"`
+	// TotalTargetShoots is the total number of shoots matching the label selector (before CEL filtering).
+	TotalTargetShoots int `json:"totalTargetShootCount,omitempty"`
 
 	// CreatedClusters is the number of clusters created by this CareInstruction.
 	CreatedClusters int `json:"createdClusters,omitempty"`
@@ -142,46 +153,32 @@ func init() {
 	SchemeBuilder.Register(&CareInstruction{}, &CareInstructionList{})
 }
 
-// ListShoots returns shoots matching the ShootSelector and ShootFilter.
+// ListShoots returns shoots matching the ShootSelector.LabelSelector.
 func (c *CareInstruction) ListShoots(ctx context.Context, gardenClient client.Client) (gardenerv1beta1.ShootList, error) {
 	shootList := gardenerv1beta1.ShootList{}
-	if err := gardenClient.List(ctx, &shootList, client.InNamespace(c.Spec.GardenNamespace), client.MatchingLabels(c.Spec.ShootSelector.MatchLabels)); err != nil {
+	listOpts := []client.ListOption{client.InNamespace(c.Spec.GardenNamespace)}
+
+	if c.Spec.ShootSelector != nil && c.Spec.ShootSelector.LabelSelector != nil {
+		selector, err := metav1.LabelSelectorAsSelector(c.Spec.ShootSelector.LabelSelector)
+		if err != nil {
+			return gardenerv1beta1.ShootList{}, fmt.Errorf("invalid label selector: %w", err)
+		}
+		listOpts = append(listOpts, client.MatchingLabelsSelector{Selector: selector})
+	}
+
+	if err := gardenClient.List(ctx, &shootList, listOpts...); err != nil {
 		return gardenerv1beta1.ShootList{}, err
 	}
 
-	if c.Spec.ShootFilter == "" {
-		return shootList, nil
-	}
-
-	shootList.Items = c.filterShootsWithCEL(ctx, shootList.Items)
 	return shootList, nil
 }
 
-// MatchesCELFilter returns whether the shoot matches the ShootFilter CEL expression.
+// MatchesCELFilter returns whether the shoot matches the CEL expression. Returns true for empty CEL expression.
 func (c *CareInstruction) MatchesCELFilter(shoot *gardenerv1beta1.Shoot) (bool, error) {
-	if c.Spec.ShootFilter == "" {
+	if c.Spec.ShootSelector == nil || c.Spec.ShootSelector.Expression == "" {
 		return true, nil
 	}
-	return cel.EvaluateTyped[bool](c.Spec.ShootFilter, shoot)
-}
-
-func (c *CareInstruction) filterShootsWithCEL(ctx context.Context, shoots []gardenerv1beta1.Shoot) []gardenerv1beta1.Shoot {
-	logger := log.FromContext(ctx)
-	filteredShoots := make([]gardenerv1beta1.Shoot, 0, len(shoots))
-
-	for i := range shoots {
-		shoot := &shoots[i]
-		matches, err := c.MatchesCELFilter(shoot)
-		if err != nil {
-			logger.Info("skipping shoot, CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
-			continue
-		}
-		if matches {
-			filteredShoots = append(filteredShoots, *shoot)
-		}
-	}
-
-	return filteredShoots
+	return cel.EvaluateTyped[bool](c.Spec.ShootSelector.Expression, shoot)
 }
 
 // ListClusters returns a list of clusters created by this CareInstruction identified by  owning CareInstruction label.
