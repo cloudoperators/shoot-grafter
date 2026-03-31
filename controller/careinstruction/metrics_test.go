@@ -25,7 +25,7 @@ var _ = Describe("CareInstruction Metrics", func() {
 				GardenNamespace: "garden-ns-1",
 			},
 			Status: v1alpha1.CareInstructionStatus{
-				TotalShoots: 10,
+				TotalTargetShoots: 10,
 			},
 		}
 
@@ -37,7 +37,7 @@ var _ = Describe("CareInstruction Metrics", func() {
 			"garden_namespace": ci.Spec.GardenNamespace,
 		}
 
-		value := promtest.ToFloat64(careinstruction.TotalShootsGauge.With(labels))
+		value := promtest.ToFloat64(careinstruction.TotalTargetShootsGauge.With(labels))
 		Expect(value).To(Equal(10.0))
 	})
 
@@ -93,7 +93,7 @@ var _ = Describe("CareInstruction Metrics", func() {
 		Expect(value).To(Equal(2.0))
 	})
 
-	It("should update ClusterReadyGauge metrics for ready clusters", func() {
+	It("should update ShootOnboardedGauge metrics for onboarded shoots", func() {
 		ci := &v1alpha1.CareInstruction{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-ci-4",
@@ -103,14 +103,14 @@ var _ = Describe("CareInstruction Metrics", func() {
 				GardenNamespace: "garden-ns-4",
 			},
 			Status: v1alpha1.CareInstructionStatus{
-				Clusters: []v1alpha1.ClusterStatus{
+				Shoots: []v1alpha1.ShootStatus{
 					{
-						Name:   "cluster-1",
-						Status: v1alpha1.ClusterStatusReady,
+						Name:   "shoot-1",
+						Status: v1alpha1.ShootStatusOnboarded,
 					},
 					{
-						Name:   "cluster-2",
-						Status: v1alpha1.ClusterStatusReady,
+						Name:   "shoot-2",
+						Status: v1alpha1.ShootStatusOnboarded,
 					},
 				},
 			},
@@ -122,22 +122,22 @@ var _ = Describe("CareInstruction Metrics", func() {
 			"care_instruction": ci.Name,
 			"namespace":        ci.Namespace,
 			"garden_namespace": ci.Spec.GardenNamespace,
-			"cluster_name":     "cluster-1",
+			"shoot_name":       "shoot-1",
 		}
 		labels2 := prometheus.Labels{
 			"care_instruction": ci.Name,
 			"namespace":        ci.Namespace,
 			"garden_namespace": ci.Spec.GardenNamespace,
-			"cluster_name":     "cluster-2",
+			"shoot_name":       "shoot-2",
 		}
 
-		value1 := promtest.ToFloat64(careinstruction.ClusterReadyGauge.With(labels1))
-		value2 := promtest.ToFloat64(careinstruction.ClusterReadyGauge.With(labels2))
+		value1 := promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(labels1))
+		value2 := promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(labels2))
 		Expect(value1).To(Equal(1.0))
 		Expect(value2).To(Equal(1.0))
 	})
 
-	It("should update ClusterReadyGauge metrics for failed clusters", func() {
+	It("should update ShootOnboardedGauge metrics for non-onboarded shoots", func() {
 		ci := &v1alpha1.CareInstruction{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-ci-5",
@@ -147,10 +147,10 @@ var _ = Describe("CareInstruction Metrics", func() {
 				GardenNamespace: "garden-ns-5",
 			},
 			Status: v1alpha1.CareInstructionStatus{
-				Clusters: []v1alpha1.ClusterStatus{
+				Shoots: []v1alpha1.ShootStatus{
 					{
-						Name:   "cluster-failed",
-						Status: v1alpha1.ClusterStatusFailed,
+						Name:   "shoot-failed",
+						Status: v1alpha1.ShootStatusFailed,
 					},
 				},
 			},
@@ -162,10 +162,10 @@ var _ = Describe("CareInstruction Metrics", func() {
 			"care_instruction": ci.Name,
 			"namespace":        ci.Namespace,
 			"garden_namespace": ci.Spec.GardenNamespace,
-			"cluster_name":     "cluster-failed",
+			"shoot_name":       "shoot-failed",
 		}
 
-		value := promtest.ToFloat64(careinstruction.ClusterReadyGauge.With(labels))
+		value := promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(labels))
 		Expect(value).To(Equal(0.0))
 	})
 
@@ -179,21 +179,21 @@ var _ = Describe("CareInstruction Metrics", func() {
 				GardenNamespace: "garden-complete",
 			},
 			Status: v1alpha1.CareInstructionStatus{
-				TotalShoots:     15,
-				CreatedClusters: 12,
-				FailedClusters:  3,
-				Clusters: []v1alpha1.ClusterStatus{
+				TotalTargetShoots: 15,
+				CreatedClusters:   12,
+				FailedClusters:    3,
+				Shoots: []v1alpha1.ShootStatus{
 					{
-						Name:   "cluster-ready-1",
-						Status: v1alpha1.ClusterStatusReady,
+						Name:   "shoot-onboarded-1",
+						Status: v1alpha1.ShootStatusOnboarded,
 					},
 					{
-						Name:   "cluster-ready-2",
-						Status: v1alpha1.ClusterStatusReady,
+						Name:   "shoot-onboarded-2",
+						Status: v1alpha1.ShootStatusOnboarded,
 					},
 					{
-						Name:   "cluster-failed-1",
-						Status: v1alpha1.ClusterStatusFailed,
+						Name:   "shoot-failed-1",
+						Status: v1alpha1.ShootStatusFailed,
 					},
 				},
 			},
@@ -208,7 +208,7 @@ var _ = Describe("CareInstruction Metrics", func() {
 		}
 
 		// Verify all gauge metrics
-		totalShoots := promtest.ToFloat64(careinstruction.TotalShootsGauge.With(baseLabels))
+		totalShoots := promtest.ToFloat64(careinstruction.TotalTargetShootsGauge.With(baseLabels))
 		createdClusters := promtest.ToFloat64(careinstruction.CreatedClustersGauge.With(baseLabels))
 		failedClusters := promtest.ToFloat64(careinstruction.FailedClustersGauge.With(baseLabels))
 
@@ -216,32 +216,32 @@ var _ = Describe("CareInstruction Metrics", func() {
 		Expect(createdClusters).To(Equal(12.0))
 		Expect(failedClusters).To(Equal(3.0))
 
-		// Verify cluster ready states
-		ready1Labels := prometheus.Labels{
+		// Verify shoot onboarded states
+		onboarded1Labels := prometheus.Labels{
 			"care_instruction": ci.Name,
 			"namespace":        ci.Namespace,
 			"garden_namespace": ci.Spec.GardenNamespace,
-			"cluster_name":     "cluster-ready-1",
+			"shoot_name":       "shoot-onboarded-1",
 		}
-		ready2Labels := prometheus.Labels{
+		onboarded2Labels := prometheus.Labels{
 			"care_instruction": ci.Name,
 			"namespace":        ci.Namespace,
 			"garden_namespace": ci.Spec.GardenNamespace,
-			"cluster_name":     "cluster-ready-2",
+			"shoot_name":       "shoot-onboarded-2",
 		}
 		failedLabels := prometheus.Labels{
 			"care_instruction": ci.Name,
 			"namespace":        ci.Namespace,
 			"garden_namespace": ci.Spec.GardenNamespace,
-			"cluster_name":     "cluster-failed-1",
+			"shoot_name":       "shoot-failed-1",
 		}
 
-		ready1Value := promtest.ToFloat64(careinstruction.ClusterReadyGauge.With(ready1Labels))
-		ready2Value := promtest.ToFloat64(careinstruction.ClusterReadyGauge.With(ready2Labels))
-		failedValue := promtest.ToFloat64(careinstruction.ClusterReadyGauge.With(failedLabels))
+		onboarded1Value := promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(onboarded1Labels))
+		onboarded2Value := promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(onboarded2Labels))
+		failedValue := promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(failedLabels))
 
-		Expect(ready1Value).To(Equal(1.0))
-		Expect(ready2Value).To(Equal(1.0))
+		Expect(onboarded1Value).To(Equal(1.0))
+		Expect(onboarded2Value).To(Equal(1.0))
 		Expect(failedValue).To(Equal(0.0))
 	})
 
@@ -255,9 +255,9 @@ var _ = Describe("CareInstruction Metrics", func() {
 				GardenNamespace: "garden-update",
 			},
 			Status: v1alpha1.CareInstructionStatus{
-				TotalShoots:     5,
-				CreatedClusters: 3,
-				FailedClusters:  2,
+				TotalTargetShoots: 5,
+				CreatedClusters:   3,
+				FailedClusters:    2,
 			},
 		}
 
@@ -270,18 +270,18 @@ var _ = Describe("CareInstruction Metrics", func() {
 			"garden_namespace": ci.Spec.GardenNamespace,
 		}
 
-		totalShoots := promtest.ToFloat64(careinstruction.TotalShootsGauge.With(labels))
+		totalShoots := promtest.ToFloat64(careinstruction.TotalTargetShootsGauge.With(labels))
 		Expect(totalShoots).To(Equal(5.0))
 
 		// Update the CareInstruction status
-		ci.Status.TotalShoots = 10
+		ci.Status.TotalTargetShoots = 10
 		ci.Status.CreatedClusters = 8
 		ci.Status.FailedClusters = 1
 
 		// Second update
 		careinstruction.UpdateCareInstructionMetrics(ci)
 
-		totalShoots = promtest.ToFloat64(careinstruction.TotalShootsGauge.With(labels))
+		totalShoots = promtest.ToFloat64(careinstruction.TotalTargetShootsGauge.With(labels))
 		createdClusters := promtest.ToFloat64(careinstruction.CreatedClustersGauge.With(labels))
 		failedClusters := promtest.ToFloat64(careinstruction.FailedClustersGauge.With(labels))
 
@@ -290,7 +290,7 @@ var _ = Describe("CareInstruction Metrics", func() {
 		Expect(failedClusters).To(Equal(1.0))
 	})
 
-	It("should handle CareInstruction with no clusters", func() {
+	It("should handle CareInstruction with no shoots", func() {
 		ci := &v1alpha1.CareInstruction{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-ci-empty",
@@ -300,10 +300,10 @@ var _ = Describe("CareInstruction Metrics", func() {
 				GardenNamespace: "garden-empty",
 			},
 			Status: v1alpha1.CareInstructionStatus{
-				TotalShoots:     0,
-				CreatedClusters: 0,
-				FailedClusters:  0,
-				Clusters:        []v1alpha1.ClusterStatus{},
+				TotalTargetShoots: 0,
+				CreatedClusters:   0,
+				FailedClusters:    0,
+				Shoots:            []v1alpha1.ShootStatus{},
 			},
 		}
 
@@ -315,7 +315,7 @@ var _ = Describe("CareInstruction Metrics", func() {
 			"garden_namespace": ci.Spec.GardenNamespace,
 		}
 
-		totalShoots := promtest.ToFloat64(careinstruction.TotalShootsGauge.With(labels))
+		totalShoots := promtest.ToFloat64(careinstruction.TotalTargetShootsGauge.With(labels))
 		createdClusters := promtest.ToFloat64(careinstruction.CreatedClustersGauge.With(labels))
 		failedClusters := promtest.ToFloat64(careinstruction.FailedClustersGauge.With(labels))
 

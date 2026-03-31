@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	TotalShootsGauge = prometheus.NewGaugeVec(
+	TotalTargetShootsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "shoot_grafter_total_shoots",
-			Help: "Total number of shoots targeted by the CareInstruction",
+			Name: "shoot_grafter_total_target_shoots",
+			Help: "Total number of shoots matching the CareInstruction label selector",
 		},
 		[]string{"care_instruction", "namespace", "garden_namespace"},
 	)
@@ -32,39 +32,39 @@ var (
 		},
 		[]string{"care_instruction", "namespace", "garden_namespace"},
 	)
-	ClusterReadyGauge = prometheus.NewGaugeVec(
+	ShootOnboardedGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "shoot_grafter_cluster_ready",
-			Help: "Is cluster created by the CareInstruction ready",
+			Name: "shoot_grafter_shoot_onboarded",
+			Help: "Is shoot onboarded by the CareInstruction",
 		},
-		[]string{"care_instruction", "namespace", "garden_namespace", "cluster_name"},
+		[]string{"care_instruction", "namespace", "garden_namespace", "shoot_name"},
 	)
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(
-		TotalShootsGauge,
+		TotalTargetShootsGauge,
 		CreatedClustersGauge,
 		FailedClustersGauge,
-		ClusterReadyGauge,
+		ShootOnboardedGauge,
 	)
 }
 
 func UpdateCareInstructionMetrics(careInstruction *v1alpha1.CareInstruction) {
-	updateTotalShootsMetric(careInstruction)
+	updateTotalTargetShootsMetric(careInstruction)
 	updateCreatedClustersMetric(careInstruction)
 	updateFailedClustersMetric(careInstruction)
-	updateReadyClustersMetrics(careInstruction)
+	updateOnboardedShootsMetrics(careInstruction)
 }
 
-func updateTotalShootsMetric(careInstruction *v1alpha1.CareInstruction) {
+func updateTotalTargetShootsMetric(careInstruction *v1alpha1.CareInstruction) {
 	metricLabels := prometheus.Labels{
 		"care_instruction": careInstruction.Name,
 		"namespace":        careInstruction.Namespace,
 		"garden_namespace": careInstruction.Spec.GardenNamespace,
 	}
-	totalShoots := careInstruction.Status.TotalShoots
-	TotalShootsGauge.With(metricLabels).Set(float64(totalShoots))
+	totalTargetShoots := careInstruction.Status.TotalTargetShoots
+	TotalTargetShootsGauge.With(metricLabels).Set(float64(totalTargetShoots))
 }
 
 func updateCreatedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
@@ -87,18 +87,18 @@ func updateFailedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 	FailedClustersGauge.With(metricLabels).Set(float64(failedCount))
 }
 
-func updateReadyClustersMetrics(careInstruction *v1alpha1.CareInstruction) {
-	for _, cs := range careInstruction.Status.Clusters {
+func updateOnboardedShootsMetrics(careInstruction *v1alpha1.CareInstruction) {
+	for _, ss := range careInstruction.Status.Shoots {
 		metricLabels := prometheus.Labels{
 			"care_instruction": careInstruction.Name,
 			"namespace":        careInstruction.Namespace,
 			"garden_namespace": careInstruction.Spec.GardenNamespace,
-			"cluster_name":     cs.Name,
+			"shoot_name":       ss.Name,
 		}
-		if cs.Status == v1alpha1.ClusterStatusReady {
-			ClusterReadyGauge.With(metricLabels).Set(float64(1))
+		if ss.Status == v1alpha1.ShootStatusOnboarded {
+			ShootOnboardedGauge.With(metricLabels).Set(float64(1))
 		} else {
-			ClusterReadyGauge.With(metricLabels).Set(float64(0))
+			ShootOnboardedGauge.With(metricLabels).Set(float64(0))
 		}
 	}
 }
