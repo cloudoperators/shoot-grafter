@@ -1922,4 +1922,272 @@ jwt:
 			}, "3s", "500ms").Should(Succeed())
 		})
 	})
+
+	When("testing OIDC authentication configuration with Shoot annotation", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-oidc",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"oidc-test": "true",
+							},
+						},
+					},
+					AuthenticationConfigMapName: "greenhouse-oidc-config",
+				},
+			}
+		})
+
+		It("should NOT annotate Shoot when setting up OIDC for the first time", func() {
+			// Create Greenhouse auth ConfigMap
+			greenhouseAuthCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "greenhouse-oidc-config",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
+
+			// Create a shoot without any OIDC configuration
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-first-time",
+					Namespace: "default",
+					Labels: map[string]string{
+						"oidc-test": "true",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-oidc-first-time.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create CA ConfigMap
+			caCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-first-time.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, caCM)).To(Succeed(), "should create CA ConfigMap")
+
+			// Eventually verify the Shoot spec was updated with ConfigMap reference
+			// but NO reconcile annotation was added (spec change triggers reconciliation)
+			Eventually(func(g Gomega) bool {
+				updatedShoot := &gardenerv1beta1.Shoot{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-first-time",
+					Namespace: "default",
+				}, updatedShoot)
+				g.Expect(err).NotTo(HaveOccurred(), "should get updated Shoot")
+
+				// Verify Shoot spec was updated with ConfigMap reference
+				if updatedShoot.Spec.Kubernetes.KubeAPIServer == nil ||
+					updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication == nil ||
+					updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication.ConfigMapName == "" {
+					return false
+				}
+
+				// Verify NO reconcile annotation was added (spec change is enough)
+				if updatedShoot.Annotations != nil {
+					_, hasReconcileAnnotation := updatedShoot.Annotations["gardener.cloud/operation"]
+					g.Expect(hasReconcileAnnotation).To(BeFalse(), "should NOT have reconcile annotation for first-time setup")
+				}
+
+				return true
+			}).Should(BeTrue(), "should eventually update Shoot spec without reconcile annotation")
+		})
+
+		It("should annotate Shoot with gardener.cloud/operation=reconcile when ConfigMap content changes", func() {
+			// Create Greenhouse auth ConfigMap
+			greenhouseAuthCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "greenhouse-oidc-config",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - greenhouse
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
+
+			// Create a shoot that ALREADY has the OIDC ConfigMap reference
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-update",
+					Namespace: "default",
+					Labels: map[string]string{
+						"oidc-test": "true",
+					},
+				},
+				Spec: gardenerv1beta1.ShootSpec{
+					Kubernetes: gardenerv1beta1.Kubernetes{
+						KubeAPIServer: &gardenerv1beta1.KubeAPIServerConfig{
+							StructuredAuthentication: &gardenerv1beta1.StructuredAuthentication{
+								ConfigMapName: "test-careinstruction-oidc-greenhouse-auth",
+							},
+						},
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-oidc-update.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create CA ConfigMap
+			caCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-oidc-update.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, caCM)).To(Succeed(), "should create CA ConfigMap")
+
+			// Create the OIDC ConfigMap in Garden cluster with initial content
+			gardenOIDCCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-oidc-greenhouse-auth",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - old-audience
+  claimMappings:
+    username:
+      claim: email
+`,
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, gardenOIDCCM)).To(Succeed(), "should create Garden OIDC ConfigMap")
+
+			// Wait a moment for initial reconciliation
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-update",
+					Namespace: "default",
+				}, secret)
+				return err == nil
+			}).Should(BeTrue(), "should eventually create secret")
+
+			// Now update the Greenhouse ConfigMap (simulating content change)
+			Eventually(func(g Gomega) error {
+				cm := &corev1.ConfigMap{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "greenhouse-oidc-config",
+					Namespace: "default",
+				}, cm)
+				if err != nil {
+					return err
+				}
+				cm.Data["config.yaml"] = `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - new-audience
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse-updated:'
+`
+				return test.K8sClient.Update(test.Ctx, cm)
+			}).Should(Succeed(), "should update Greenhouse auth ConfigMap")
+
+			// Trigger reconciliation by updating shoot label
+			Eventually(func(g Gomega) error {
+				s := &gardenerv1beta1.Shoot{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-update",
+					Namespace: "default",
+				}, s)
+				if err != nil {
+					return err
+				}
+				if s.Labels == nil {
+					s.Labels = make(map[string]string)
+				}
+				s.Labels["trigger-reconcile"] = "true"
+				return test.GardenK8sClient.Update(test.Ctx, s)
+			}).Should(Succeed(), "should update Shoot to trigger reconciliation")
+
+			// Eventually verify the Shoot has the reconcile annotation
+			Eventually(func(g Gomega) bool {
+				updatedShoot := &gardenerv1beta1.Shoot{}
+				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-oidc-update",
+					Namespace: "default",
+				}, updatedShoot)
+				g.Expect(err).NotTo(HaveOccurred(), "should get updated Shoot")
+
+				// Verify reconcile annotation was added
+				if updatedShoot.Annotations == nil {
+					return false
+				}
+				reconcileOp, hasReconcileAnnotation := updatedShoot.Annotations["gardener.cloud/operation"]
+				g.Expect(hasReconcileAnnotation).To(BeTrue(), "should have reconcile annotation for ConfigMap content change")
+				g.Expect(reconcileOp).To(Equal("reconcile"), "should have correct reconcile annotation value")
+
+				return true
+			}).Should(BeTrue(), "should eventually add reconcile annotation to Shoot")
+		})
+	})
 })
