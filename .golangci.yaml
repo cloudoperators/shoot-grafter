@@ -146,8 +146,6 @@ linters:
         - G112
         # created file permissions are restricted by umask if necessary
         - G306
-        # false positive when cancel func is stored in a struct field and called later
-        - G118
     govet:
       disable:
         - fieldalignment
