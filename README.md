@@ -385,6 +385,19 @@ data:
           prefix: "greenhouse:"
 ```
 
+### OIDC Configuration Updates and Shoot Reconciliation
+
+When `spec.authenticationConfigMapName` is configured in a CareInstruction, shoot-grafter automatically manages OIDC authentication on Shoots:
+
+1. **Initial Setup**: When a Shoot is first onboarded, shoot-grafter creates an AuthenticationConfiguration ConfigMap in the Garden cluster and updates the Shoot's spec to reference it.
+
+2. **Configuration Updates**: When the Greenhouse AuthenticationConfiguration ConfigMap is updated with new OIDC settings:
+   - shoot-grafter merges the updated configuration with any existing Garden cluster configuration
+   - If the Shoot spec already references the correct ConfigMap (no spec change needed), shoot-grafter automatically triggers a Shoot reconciliation by annotating it with `gardener.cloud/operation: reconcile` to apply the changes immediately without waiting for the Shoot's maintenance window
+   - See the [Gardener documentation on immediate reconciliation](https://gardener.cloud/docs/gardener/shoot-operations/shoot_operations/#immediate-reconciliation) for more details
+
+**Note**: If the Shoot spec needs to be updated (e.g., when the ConfigMap reference changes), the spec update itself triggers reconciliation automatically, so no additional annotation is needed.
+
 ## Debugging Shoot Reconciliation
 
 shoot-grafter emits Kubernetes events to help you monitor and debug the Shoot onboarding process. Events are associated with the CareInstruction resource.
