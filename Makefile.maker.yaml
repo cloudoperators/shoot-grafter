@@ -6,6 +6,7 @@
 # NOTE: After running go-makefile-maker, manually apply these changes:
 # 1. Add 'branches: [main]' to container-registry-ghcr.yaml for main branch builds
 # 2. Change 'make build/cover.out' to 'make test-with-envtest' in ci.yaml for envtest support
+# 3. Change 'rm typos' to 'rm -f typos' in checks.yaml
 
 metadata:
   url: https://github.com/cloudoperators/shoot-grafter

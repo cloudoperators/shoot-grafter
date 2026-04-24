@@ -45,7 +45,7 @@ jobs:
         env:
           CLICOLOR: "1"
       - name: Delete typos binary
-        run: rm typos
+        run: rm -f typos
       - name: Check if source code files have license header
         run: make check-addlicense
       - name: REUSE Compliance Check
