@@ -26,7 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -36,6 +39,7 @@ const (
 
 type ShootController struct {
 	GreenhouseClient client.Client
+	GreenhouseMgr    ctrl.Manager // GreenhouseMgr provides the Greenhouse cluster cache for watches
 	GardenClient     client.Client
 	logr.Logger
 	Name            string
@@ -75,11 +79,49 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		r.Error(nil, "EventRecorder is not set for ShootController", "name", r.Name)
 	}
 
-	// Setup the shoot controller with the manager
-	return ctrl.NewControllerManagedBy(mgr).
+	b := ctrl.NewControllerManagedBy(mgr).
 		Named(r.Name).
-		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
-		Complete(r)
+		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...))
+
+	// Watch AuthenticationConfiguration ConfigMaps on the Greenhouse cluster.
+	// When they change, all Shoots managed by this CareInstruction are re-enqueued
+	// so OIDC config stays in sync with the Greenhouse source.
+	// The predicate restricts events to CMs that carry both the auth-configmap marker
+	// and the CareInstruction ownership label matching this controller instance.
+	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" && r.GreenhouseMgr != nil {
+		authCMPredicate := predicate.NewTypedPredicateFuncs(func(cm *corev1.ConfigMap) bool {
+			labels := cm.GetLabels()
+			return labels[v1alpha1.AuthConfigMapLabel] == "true" &&
+				labels[v1alpha1.CareInstructionLabel] == r.CareInstruction.Name
+		})
+		b = b.WatchesRawSource(source.Kind(
+			r.GreenhouseMgr.GetCache(),
+			&corev1.ConfigMap{},
+			handler.TypedEnqueueRequestsFromMapFunc(r.enqueueShootsForAuthConfigMap),
+			authCMPredicate,
+		))
+	}
+
+	// Setup the shoot controller with the manager
+	return b.Complete(r)
+}
+
+func (r *ShootController) enqueueShootsForAuthConfigMap(ctx context.Context, _ *corev1.ConfigMap) []reconcile.Request {
+	shoots, err := r.CareInstruction.ListShoots(ctx, r.GardenClient)
+	if err != nil {
+		r.Info("failed to list shoots for auth ConfigMap change", "error", err)
+		return nil
+	}
+	requests := make([]ctrl.Request, 0, len(shoots.Items))
+	for _, shoot := range shoots.Items {
+		requests = append(requests, ctrl.Request{
+			NamespacedName: client.ObjectKey{
+				Namespace: shoot.Namespace,
+				Name:      shoot.Name,
+			},
+		})
+	}
+	return requests
 }
 
 func (r *ShootController) newCELPredicate() predicate.Predicate {

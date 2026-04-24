@@ -288,9 +288,11 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 
 	// Register the ShootController with the garden manager
-	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster
+	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster.
+	// GreenhouseMgr is passed so the ShootController can watch Greenhouse cluster resources (e.g. auth CMs).
 	sc := &shoot.ShootController{
 		GreenhouseClient: r.Client,
+		GreenhouseMgr:    r.Manager,
 		GardenClient:     gardenClient,
 		Logger:           r.WithValues("careInstruction", careInstruction.Name),
 		Name:             shoot.GenerateName(careInstruction.Name),

@@ -34,14 +34,23 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 			r.CareInstruction.Spec.AuthenticationConfigMapName, err)
 	}
 
-	// Add the auth ConfigMap label if it doesn't exist
+	// Add labels if missing: AuthConfigMapLabel marks CMs as auth config maps,
+	// CareInstructionLabel associates the CM with the owning CareInstruction.
 	if greenhouseAuthConfigMap.Labels == nil {
 		greenhouseAuthConfigMap.Labels = make(map[string]string)
 	}
+	labelsNeedUpdate := false
 	if _, hasLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasLabel {
 		greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+		labelsNeedUpdate = true
+	}
+	if val, hasLabel := greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel]; !hasLabel || val != r.CareInstruction.Name {
+		greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
+		labelsNeedUpdate = true
+	}
+	if labelsNeedUpdate {
 		if err := r.GreenhouseClient.Update(ctx, &greenhouseAuthConfigMap); err != nil {
-			r.Info("failed to add auth ConfigMap label", "configMap", greenhouseAuthConfigMap.Name, "error", err)
+			r.Info("failed to add labels to auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", err)
 			// Don't fail the reconciliation for this, just log it
 		}
 	}
