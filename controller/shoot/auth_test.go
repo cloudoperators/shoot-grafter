@@ -93,7 +93,7 @@ var _ = Describe("Auth", func() {
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
 									Claim:  "sub",
-									Prefix: stringPtr("greenhouse:"),
+									Prefix: new("greenhouse:"),
 								},
 							},
 						},
@@ -132,7 +132,7 @@ jwt:
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
 									Claim:  "sub",
-									Prefix: stringPtr("greenhouse:"),
+									Prefix: new("greenhouse:"),
 								},
 							},
 						},
@@ -182,7 +182,7 @@ jwt:
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
 									Claim:  "sub",
-									Prefix: stringPtr("greenhouse:"),
+									Prefix: new("greenhouse:"),
 								},
 							},
 						},
@@ -237,7 +237,7 @@ jwt:
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
 									Claim:  "sub",
-									Prefix: stringPtr("greenhouse:"),
+									Prefix: new("greenhouse:"),
 								},
 							},
 						},
@@ -299,7 +299,7 @@ jwt:
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
 									Claim:  "sub",
-									Prefix: stringPtr("greenhouse:"),
+									Prefix: new("greenhouse:"),
 								},
 							},
 						},
@@ -311,7 +311,7 @@ jwt:
 							ClaimMappings: apiserverv1beta1.ClaimMappings{
 								Username: apiserverv1beta1.PrefixedClaimOrExpression{
 									Claim:  "email",
-									Prefix: stringPtr("other:"),
+									Prefix: new("other:"),
 								},
 							},
 						},
@@ -381,8 +381,3 @@ jwt:
 		})
 	})
 })
-
-// stringPtr returns a pointer to the given string
-func stringPtr(s string) *string {
-	return &s
-}

@@ -29,13 +29,13 @@ jobs:
         uses: actions/setup-go@v6
         with:
           check-latest: true
-          go-version: 1.25.8
+          go-version: 1.26.2
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
       - name: Delete pre-installed shellcheck
-        run: sudo rm -f $(which shellcheck)
+        run: sudo rm -f "$(which shellcheck)"
       - name: Run shellcheck
         run: make run-shellcheck
       - name: Dependency Licenses Review
