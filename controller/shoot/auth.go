@@ -36,6 +36,8 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 
 	// Add labels if missing: AuthConfigMapLabel marks CMs as auth config maps,
 	// CareInstructionLabel associates the CM with the owning CareInstruction.
+	// Take a snapshot before any mutations so the patch only touches metadata.labels.
+	base := greenhouseAuthConfigMap.DeepCopy()
 	if greenhouseAuthConfigMap.Labels == nil {
 		greenhouseAuthConfigMap.Labels = make(map[string]string)
 	}
@@ -49,8 +51,10 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		labelsNeedUpdate = true
 	}
 	if labelsNeedUpdate {
-		if err := r.GreenhouseClient.Update(ctx, &greenhouseAuthConfigMap); err != nil {
-			r.Info("failed to add labels to auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", err)
+		// Use a merge patch so only metadata.labels is sent to the API server.
+		// This avoids overwriting concurrent changes to config.yaml or other fields.
+		if err := r.GreenhouseClient.Patch(ctx, &greenhouseAuthConfigMap, client.MergeFrom(base)); err != nil {
+			r.Info("failed to patch labels on auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", err)
 			// Don't fail the reconciliation for this, just log it
 		}
 	}
