@@ -114,6 +114,9 @@ func (r *ShootController) enqueueShootsForAuthConfigMap(ctx context.Context, _ *
 	}
 	requests := make([]reconcile.Request, 0, len(shoots.Items))
 	for _, shoot := range shoots.Items {
+		if !r.matchesCEL(&shoot) {
+			continue
+		}
 		requests = append(requests, reconcile.Request{
 			NamespacedName: client.ObjectKey{
 				Namespace: shoot.Namespace,
