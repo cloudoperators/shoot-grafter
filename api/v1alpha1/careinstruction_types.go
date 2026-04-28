@@ -36,7 +36,7 @@ const (
 	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
-	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/authconfigmap"
+	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/auth-configmap"
 
 	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
 	ShootStatusOnboarded = "Onboarded"
