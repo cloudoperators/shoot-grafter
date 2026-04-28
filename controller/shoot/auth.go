@@ -34,22 +34,33 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 			r.CareInstruction.Spec.AuthenticationConfigMapName, err)
 	}
 
-	// Add labels if missing: AuthConfigMapLabel marks CMs as auth config maps,
-	// CareInstructionLabel associates the CM with the owning CareInstruction.
+	// Label the ConfigMap so the watch predicate can identify it and associate it with this CareInstruction.
 	// Take a snapshot before any mutations so the patch only touches metadata.labels.
 	base := greenhouseAuthConfigMap.DeepCopy()
 	if greenhouseAuthConfigMap.Labels == nil {
 		greenhouseAuthConfigMap.Labels = make(map[string]string)
 	}
 	labelsNeedUpdate := false
-	if _, hasLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasLabel {
-		greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
-		labelsNeedUpdate = true
+
+	// If the CM is already owned by a different CareInstruction, skip relabelling to
+	// avoid breaking its watch predicate. OIDC merging still proceeds normally.
+	existingOwner, hasCILabel := greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel]
+	if hasCILabel && existingOwner != r.CareInstruction.Name {
+		r.Info("auth ConfigMap is already owned by another CareInstruction; skipping relabel to avoid breaking its watch",
+			"configMap", greenhouseAuthConfigMap.Name,
+			"existingOwner", existingOwner,
+			"thisCareInstruction", r.CareInstruction.Name)
+	} else {
+		if _, hasAuthLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasAuthLabel {
+			greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+			labelsNeedUpdate = true
+		}
+		if !hasCILabel {
+			greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
+			labelsNeedUpdate = true
+		}
 	}
-	if val, hasLabel := greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel]; !hasLabel || val != r.CareInstruction.Name {
-		greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
-		labelsNeedUpdate = true
-	}
+
 	if labelsNeedUpdate {
 		// Use a merge patch so only metadata.labels is sent to the API server.
 		// This avoids overwriting concurrent changes to config.yaml or other fields.
