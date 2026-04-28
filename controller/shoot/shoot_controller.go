@@ -112,9 +112,9 @@ func (r *ShootController) enqueueShootsForAuthConfigMap(ctx context.Context, _ *
 		r.Info("failed to list shoots for auth ConfigMap change", "error", err)
 		return nil
 	}
-	requests := make([]ctrl.Request, 0, len(shoots.Items))
+	requests := make([]reconcile.Request, 0, len(shoots.Items))
 	for _, shoot := range shoots.Items {
-		requests = append(requests, ctrl.Request{
+		requests = append(requests, reconcile.Request{
 			NamespacedName: client.ObjectKey{
 				Namespace: shoot.Namespace,
 				Name:      shoot.Name,

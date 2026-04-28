@@ -77,7 +77,6 @@ var _ = Describe("Shoot Controller", func() {
 		// Create ShootController with EventRecorder and GreenhouseMgr from the Greenhouse manager.
 		// GreenhouseMgr is required so the ShootController can watch Greenhouse auth CMs and
 		// re-enqueue Shoots when they change.
-		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the manager")
 		Expect((&shoot.ShootController{
 			GreenhouseClient: test.K8sClient,
 			GreenhouseMgr:    greenhouseMgr, // Provide Greenhouse manager for cross-cluster CM watch
