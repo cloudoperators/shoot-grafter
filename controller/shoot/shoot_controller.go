@@ -89,17 +89,16 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		authCMPredicate := predicate.TypedFuncs[*corev1.ConfigMap]{
 			CreateFunc: func(_ event.TypedCreateEvent[*corev1.ConfigMap]) bool { return false },
 			UpdateFunc: func(e event.TypedUpdateEvent[*corev1.ConfigMap]) bool {
-				old, new := e.ObjectOld, e.ObjectNew
-				if new.GetName() != r.CareInstruction.Spec.AuthenticationConfigMapName ||
-					new.GetNamespace() != r.CareInstruction.GetNamespace() {
+				oldCM, newCM := e.ObjectOld, e.ObjectNew
+				if newCM.GetName() != r.CareInstruction.Spec.AuthenticationConfigMapName ||
+					newCM.GetNamespace() != r.CareInstruction.GetNamespace() {
 					return false
 				}
-				if new.GetLabels()[v1alpha1.AuthConfigMapLabel] != "true" ||
-					new.GetLabels()[v1alpha1.CareInstructionLabel] != r.CareInstruction.Name {
+				if newCM.GetLabels()[v1alpha1.AuthConfigMapLabel] != "true" ||
+					newCM.GetLabels()[v1alpha1.CareInstructionLabel] != r.CareInstruction.Name {
 					return false
 				}
-				// Only fire when Data changed.
-				return !maps.Equal(old.Data, new.Data)
+				return !maps.Equal(oldCM.Data, newCM.Data)
 			},
 			DeleteFunc: func(_ event.TypedDeleteEvent[*corev1.ConfigMap]) bool { return false },
 		}
