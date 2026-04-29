@@ -86,12 +86,23 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 	// Watch the auth ConfigMap on the Greenhouse cluster; re-enqueue all Shoots when it changes
 	// so the Garden-side OIDC config stays in sync.
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" && r.GreenhouseMgr != nil {
-		authCMPredicate := predicate.NewTypedPredicateFuncs(func(cm *corev1.ConfigMap) bool {
-			return cm.GetName() == r.CareInstruction.Spec.AuthenticationConfigMapName &&
-				cm.GetNamespace() == r.CareInstruction.GetNamespace() &&
-				cm.GetLabels()[v1alpha1.AuthConfigMapLabel] == "true" &&
-				cm.GetLabels()[v1alpha1.CareInstructionLabel] == r.CareInstruction.Name
-		})
+		authCMPredicate := predicate.TypedFuncs[*corev1.ConfigMap]{
+			CreateFunc: func(_ event.TypedCreateEvent[*corev1.ConfigMap]) bool { return false },
+			UpdateFunc: func(e event.TypedUpdateEvent[*corev1.ConfigMap]) bool {
+				old, new := e.ObjectOld, e.ObjectNew
+				if new.GetName() != r.CareInstruction.Spec.AuthenticationConfigMapName ||
+					new.GetNamespace() != r.CareInstruction.GetNamespace() {
+					return false
+				}
+				if new.GetLabels()[v1alpha1.AuthConfigMapLabel] != "true" ||
+					new.GetLabels()[v1alpha1.CareInstructionLabel] != r.CareInstruction.Name {
+					return false
+				}
+				// Only fire when Data changed.
+				return !maps.Equal(old.Data, new.Data)
+			},
+			DeleteFunc: func(_ event.TypedDeleteEvent[*corev1.ConfigMap]) bool { return false },
+		}
 		b = b.WatchesRawSource(source.Kind(
 			r.GreenhouseMgr.GetCache(),
 			&corev1.ConfigMap{},
