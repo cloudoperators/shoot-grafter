@@ -83,16 +83,14 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		Named(r.Name).
 		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...))
 
-	// Watch AuthenticationConfiguration ConfigMaps on the Greenhouse cluster.
-	// When they change, all Shoots managed by this CareInstruction are re-enqueued
-	// so OIDC config stays in sync with the Greenhouse source.
-	// The predicate restricts events to CMs that carry both the auth-configmap marker
-	// and the CareInstruction ownership label matching this controller instance.
+	// Watch the auth ConfigMap on the Greenhouse cluster; re-enqueue all Shoots when it changes
+	// so the Garden-side OIDC config stays in sync.
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" && r.GreenhouseMgr != nil {
 		authCMPredicate := predicate.NewTypedPredicateFuncs(func(cm *corev1.ConfigMap) bool {
-			labels := cm.GetLabels()
-			return labels[v1alpha1.AuthConfigMapLabel] == "true" &&
-				labels[v1alpha1.CareInstructionLabel] == r.CareInstruction.Name
+			return cm.GetName() == r.CareInstruction.Spec.AuthenticationConfigMapName &&
+				cm.GetNamespace() == r.CareInstruction.GetNamespace() &&
+				cm.GetLabels()[v1alpha1.AuthConfigMapLabel] == "true" &&
+				cm.GetLabels()[v1alpha1.CareInstructionLabel] == r.CareInstruction.Name
 		})
 		b = b.WatchesRawSource(source.Kind(
 			r.GreenhouseMgr.GetCache(),

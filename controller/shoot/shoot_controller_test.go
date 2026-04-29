@@ -6,6 +6,7 @@ package shoot_test
 import (
 	"context"
 	"encoding/base64"
+	"time"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
@@ -100,10 +101,10 @@ var _ = Describe("Shoot Controller", func() {
 			Expect(greenhouseMgr.Start(ghCtx)).To(Succeed(), "there must be no error starting the greenhouse manager")
 		}()
 
-		// Wait for the Greenhouse cache to be fully synced before proceeding.
-		// This ensures the source.Kind watch on the Greenhouse cache is established
-		// before any test assertions that depend on watch-triggered reconciliation.
-		Expect(greenhouseMgr.GetCache().WaitForCacheSync(ghCtx)).To(BeTrue(),
+		// Wait for the Greenhouse cache to sync before proceeding so the auth CM watch is established.
+		syncCtx, syncCancel := context.WithTimeout(ghCtx, 30*time.Second)
+		defer syncCancel()
+		Expect(greenhouseMgr.GetCache().WaitForCacheSync(syncCtx)).To(BeTrue(),
 			"the greenhouse manager cache must be synced before running watch-dependent assertions")
 
 		// start the garden manager
