@@ -51,7 +51,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/greenhouse
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/shoot-grafter
           tags: |
             type=semver,pattern={{version}},prefix=v
             type=semver,pattern={{major}}.{{minor}},prefix=v
@@ -79,7 +79,6 @@ jobs:
           #  cache-to: type=gha,mode=max
           platforms: |
             linux/amd64
-            linux/arm64
 
   notify-extensions:
     name: Notify greenhouse-extensions
@@ -90,7 +89,7 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v3.1.1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
