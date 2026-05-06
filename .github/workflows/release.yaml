@@ -12,6 +12,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
   build-and-push-image:
     name: Build and push container image
