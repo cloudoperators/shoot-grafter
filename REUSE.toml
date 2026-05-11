@@ -20,6 +20,7 @@ path = [
   "go.mod",
   "go.sum",
   "Makefile.maker.yaml",
+  "vendor/modules.txt",
 ]
 SPDX-FileCopyrightText = "SAP SE or an SAP affiliate company and Greenhouse contributors"
 SPDX-License-Identifier = "Apache-2.0"

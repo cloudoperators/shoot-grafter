@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const configYAMLKey = "config.yaml"
+
 // configureOIDCAuthentication configures OIDC authentication for the Shoot by:
 // 1. Fetching the AuthenticationConfiguration ConfigMap from Greenhouse cluster
 // 2. Merging it with any existing configuration on the Garden cluster
@@ -47,14 +49,14 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 	}
 
 	// Verify the ConfigMap contains config.yaml
-	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data["config.yaml"] == "" {
+	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data[configYAMLKey] == "" {
 		return fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain config.yaml",
 			r.CareInstruction.Spec.AuthenticationConfigMapName)
 	}
 
 	// Parse the Greenhouse authentication configuration
 	var greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration
-	if err := yaml.Unmarshal([]byte(greenhouseAuthConfigMap.Data["config.yaml"]), &greenhouseAuthConfig); err != nil {
+	if err := yaml.Unmarshal([]byte(greenhouseAuthConfigMap.Data[configYAMLKey]), &greenhouseAuthConfig); err != nil {
 		return fmt.Errorf("failed to parse Greenhouse AuthenticationConfiguration: %w", err)
 	}
 
@@ -90,7 +92,7 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 				Namespace: shoot.Namespace,
 			},
 			Data: map[string]string{
-				"config.yaml": "",
+				configYAMLKey: "",
 			},
 		}
 	}
@@ -162,8 +164,8 @@ func (r *ShootController) mergeAuthenticationConfigurations(gardenConfigMap *cor
 	var gardenAuthConfig apiserverv1beta1.AuthenticationConfiguration
 
 	// Parse existing Garden configuration if present
-	if gardenConfigMap.Data != nil && gardenConfigMap.Data["config.yaml"] != "" {
-		existingConfigYAML := gardenConfigMap.Data["config.yaml"]
+	if gardenConfigMap.Data != nil && gardenConfigMap.Data[configYAMLKey] != "" {
+		existingConfigYAML := gardenConfigMap.Data[configYAMLKey]
 		if err := yaml.Unmarshal([]byte(existingConfigYAML), &gardenAuthConfig); err != nil {
 			return fmt.Errorf("failed to parse existing Garden AuthenticationConfiguration: %w", err)
 		}
@@ -212,7 +214,7 @@ func (r *ShootController) mergeAuthenticationConfigurations(gardenConfigMap *cor
 	if gardenConfigMap.Data == nil {
 		gardenConfigMap.Data = make(map[string]string)
 	}
-	gardenConfigMap.Data["config.yaml"] = string(mergedConfigYAML)
+	gardenConfigMap.Data[configYAMLKey] = string(mergedConfigYAML)
 
 	return nil
 }
