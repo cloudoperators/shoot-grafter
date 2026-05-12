@@ -26,10 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -38,9 +35,9 @@ const (
 )
 
 type ShootController struct {
-	GreenhouseClient client.Client
-	GreenhouseMgr    ctrl.Manager // GreenhouseMgr provides the Greenhouse cluster cache for watches
-	GardenClient     client.Client
+	GreenhouseClient  client.Client
+	GardenClient      client.Client
+	AuthConfigMapData map[string]string // In-memory auth ConfigMap Data provided by the CareInstruction controller
 	logr.Logger
 	Name            string
 	CareInstruction *v1alpha1.CareInstruction
@@ -79,60 +76,11 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		r.Error(nil, "EventRecorder is not set for ShootController", "name", r.Name)
 	}
 
-	b := ctrl.NewControllerManagedBy(mgr).
-		Named(r.Name).
-		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...))
-
-	// Watch the auth ConfigMap on the Greenhouse cluster; re-enqueue all Shoots when it changes
-	// so the Garden-side OIDC config stays in sync.
-	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" && r.GreenhouseMgr != nil {
-		authCMPredicate := predicate.TypedFuncs[*corev1.ConfigMap]{
-			CreateFunc: func(_ event.TypedCreateEvent[*corev1.ConfigMap]) bool { return false },
-			UpdateFunc: func(e event.TypedUpdateEvent[*corev1.ConfigMap]) bool {
-				oldCM, newCM := e.ObjectOld, e.ObjectNew
-				if newCM.GetName() != r.CareInstruction.Spec.AuthenticationConfigMapName ||
-					newCM.GetNamespace() != r.CareInstruction.GetNamespace() {
-					return false
-				}
-				if newCM.GetLabels()[v1alpha1.AuthConfigMapLabel] != "true" ||
-					newCM.GetLabels()[v1alpha1.CareInstructionLabel] != r.CareInstruction.Name {
-					return false
-				}
-				return !maps.Equal(oldCM.Data, newCM.Data)
-			},
-			DeleteFunc: func(_ event.TypedDeleteEvent[*corev1.ConfigMap]) bool { return false },
-		}
-		b = b.WatchesRawSource(source.Kind(
-			r.GreenhouseMgr.GetCache(),
-			&corev1.ConfigMap{},
-			handler.TypedEnqueueRequestsFromMapFunc(r.enqueueShootsForAuthConfigMap),
-			authCMPredicate,
-		))
-	}
-
 	// Setup the shoot controller with the manager
-	return b.Complete(r)
-}
-
-func (r *ShootController) enqueueShootsForAuthConfigMap(ctx context.Context, _ *corev1.ConfigMap) []reconcile.Request {
-	shoots, err := r.CareInstruction.ListShoots(ctx, r.GardenClient)
-	if err != nil {
-		r.Info("failed to list shoots for auth ConfigMap change", "error", err)
-		return nil
-	}
-	requests := make([]reconcile.Request, 0, len(shoots.Items))
-	for _, shoot := range shoots.Items {
-		if !r.matchesCEL(&shoot) {
-			continue
-		}
-		requests = append(requests, reconcile.Request{
-			NamespacedName: client.ObjectKey{
-				Namespace: shoot.Namespace,
-				Name:      shoot.Name,
-			},
-		})
-	}
-	return requests
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(r.Name).
+		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
+		Complete(r)
 }
 
 func (r *ShootController) newCELPredicate() predicate.Predicate {

@@ -6,7 +6,6 @@ package shoot_test
 import (
 	"context"
 	"encoding/base64"
-	"time"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
@@ -31,11 +30,11 @@ import (
 )
 
 var (
-	careInstruction     *v1alpha1.CareInstruction
-	mgrCtx              context.Context
-	mgrCancel           context.CancelFunc
-	greenhouseMgrCancel context.CancelFunc
+	careInstruction *v1alpha1.CareInstruction
+	mgrCtx          context.Context
+	mgrCancel       context.CancelFunc
 )
+
 var _ = Describe("Shoot Controller", func() {
 	JustBeforeEach(func() {
 		// register controllers in JustBeforeEach, as they depend on the CareInstruction.
@@ -65,27 +64,40 @@ var _ = Describe("Shoot Controller", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the garden manager")
 
-		// Create a manager for the Greenhouse cluster (where events should be emitted)
+		// Set up the ShootController with the garden manager.
+		// If the CareInstruction references an auth ConfigMap, fetch its data so configureOIDCAuthentication
+		// can use it (in production this is passed in-memory by the CareInstruction controller).
+		var authConfigMapData map[string]string
+		if careInstruction.Spec.AuthenticationConfigMapName != "" {
+			var authCM corev1.ConfigMap
+			if err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+				Namespace: careInstruction.Namespace,
+				Name:      careInstruction.Spec.AuthenticationConfigMapName,
+			}, &authCM); err == nil {
+				authConfigMapData = authCM.Data
+			}
+		}
+
+		// Build an event recorder backed by the Greenhouse cluster so events are emitted there.
+		// The garden manager's recorder would emit to the Garden cluster, but tests verify events
+		// on the Greenhouse cluster (test.K8sClient).
 		greenhouseMgr, err := ctrl.NewManager(test.Cfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Metrics: server.Options{
-				BindAddress: "0", // Disable metrics
+				BindAddress: "0",
 			},
 			LeaderElection: false,
 		})
-		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager")
+		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager for event recording")
 
-		// Create ShootController with EventRecorder and GreenhouseMgr from the Greenhouse manager.
-		// GreenhouseMgr is required so the ShootController can watch Greenhouse auth CMs and
-		// re-enqueue Shoots when they change.
 		Expect((&shoot.ShootController{
-			GreenhouseClient: test.K8sClient,
-			GreenhouseMgr:    greenhouseMgr, // Provide Greenhouse manager for cross-cluster CM watch
-			GardenClient:     test.GardenK8sClient,
-			Logger:           ctrl.Log.WithName("controllers").WithName("ShootController"),
-			Name:             "ShootController",
-			CareInstruction:  careInstruction,
-			EventRecorder:    greenhouseMgr.GetEventRecorderFor("ShootController"), // Get EventRecorder from Greenhouse manager
+			GreenhouseClient:  test.K8sClient,
+			GardenClient:      test.GardenK8sClient,
+			Logger:            ctrl.Log.WithName("controllers").WithName("ShootController"),
+			Name:              "ShootController",
+			CareInstruction:   careInstruction,
+			EventRecorder:     greenhouseMgr.GetEventRecorderFor("ShootController"),
+			AuthConfigMapData: authConfigMapData,
 		}).SetupWithManager(mgr)).To(Succeed(), "there must be no error setting up the controller with the manager")
 
 		careInstructionWebhook := &webhookv1alpha1.CareInstructionWebhook{}
@@ -93,21 +105,11 @@ var _ = Describe("Shoot Controller", func() {
 
 		mgrCtx, mgrCancel = context.WithCancel(test.Ctx)
 
-		// start the Greenhouse manager so its cache is populated for the auth CM watch
-		ghCtx, ghCancel := context.WithCancel(test.Ctx)
-		greenhouseMgrCancel = ghCancel
+		// start both managers
 		go func() {
 			defer GinkgoRecover()
-			Expect(greenhouseMgr.Start(ghCtx)).To(Succeed(), "there must be no error starting the greenhouse manager")
+			Expect(greenhouseMgr.Start(mgrCtx)).To(Succeed())
 		}()
-
-		// Wait for the Greenhouse cache to sync before proceeding so the auth CM watch is established.
-		syncCtx, syncCancel := context.WithTimeout(ghCtx, 30*time.Second)
-		defer syncCancel()
-		Expect(greenhouseMgr.GetCache().WaitForCacheSync(syncCtx)).To(BeTrue(),
-			"the greenhouse manager cache must be synced before running watch-dependent assertions")
-
-		// start the garden manager
 		go func() {
 			defer GinkgoRecover()
 			Expect(mgr.Start(mgrCtx)).To(Succeed(), "there must be no error starting the manager")
@@ -176,24 +178,20 @@ var _ = Describe("Shoot Controller", func() {
 			return len(configMaps.Items) == 0 // Only the garden cluster ConfigMap should remain
 		}).Should(BeTrue(), "should eventually not find ConfigMap resources")
 
-		// Clean up auth ConfigMaps in Greenhouse cluster using label selector
-		greenhouseAuthConfigMaps := &corev1.ConfigMapList{}
-		Expect(test.K8sClient.List(test.Ctx, greenhouseAuthConfigMaps, client.MatchingLabels{
-			v1alpha1.AuthConfigMapLabel: "true",
-		})).To(Succeed(), "should list auth ConfigMaps in Greenhouse cluster")
-		for _, configMap := range greenhouseAuthConfigMaps.Items {
-			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete auth ConfigMap resource")
+		// Clean up all ConfigMaps created during tests in the Greenhouse cluster
+		greenhouseConfigMaps := &corev1.ConfigMapList{}
+		Expect(test.K8sClient.List(test.Ctx, greenhouseConfigMaps, client.InNamespace("default"))).To(Succeed(), "should list ConfigMaps in Greenhouse cluster")
+		for _, configMap := range greenhouseConfigMaps.Items {
+			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete ConfigMap resource")
 		}
 		Eventually(func(g Gomega) bool {
-			greenhouseAuthConfigMaps := &corev1.ConfigMapList{}
-			err := test.K8sClient.List(test.Ctx, greenhouseAuthConfigMaps, client.MatchingLabels{
-				v1alpha1.AuthConfigMapLabel: "true",
-			})
+			greenhouseConfigMaps := &corev1.ConfigMapList{}
+			err := test.K8sClient.List(test.Ctx, greenhouseConfigMaps, client.InNamespace("default"))
 			if err != nil {
 				return false
 			}
-			return len(greenhouseAuthConfigMaps.Items) == 0
-		}).Should(BeTrue(), "should eventually not find auth ConfigMap resources in Greenhouse cluster")
+			return len(greenhouseConfigMaps.Items) == 0
+		}).Should(BeTrue(), "should eventually not find ConfigMap resources in Greenhouse cluster")
 
 		// Clean up any Events created during the tests
 		events := &corev1.EventList{}
@@ -210,12 +208,7 @@ var _ = Describe("Shoot Controller", func() {
 			return len(events.Items) == 0
 		}).Should(BeTrue(), "should eventually not find Event resources")
 
-		// stop both managers
 		mgrCancel()
-		if greenhouseMgrCancel != nil {
-			greenhouseMgrCancel()
-			greenhouseMgrCancel = nil
-		}
 
 	})
 
@@ -1778,165 +1771,6 @@ jwt:
 		})
 	})
 
-	When("testing OIDC configuration watch triggering reconciliation", func() {
-		var greenhouseAuthConfigMap *corev1.ConfigMap
-
-		BeforeEach(func() {
-			careInstruction = &v1alpha1.CareInstruction{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-careinstruction-watch",
-					Namespace: "default",
-				},
-				Spec: v1alpha1.CareInstructionSpec{
-					ShootSelector: &v1alpha1.ShootSelector{
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"test": "watch",
-							},
-						},
-					},
-					AuthenticationConfigMapName: "greenhouse-auth-config-watch",
-				},
-			}
-
-			// Create the Greenhouse AuthenticationConfiguration ConfigMap with initial OIDC config.
-			// The watch predicate requires both AuthConfigMapLabel and CareInstructionLabel.
-			// The controller will add CareInstructionLabel on first reconciliation; we pre-set
-			// AuthConfigMapLabel here so the CM is already identifiable as an auth CM.
-			greenhouseAuthConfigMap = &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "greenhouse-auth-config-watch",
-					Namespace: "default",
-					Labels: map[string]string{
-						v1alpha1.AuthConfigMapLabel: "true",
-					},
-				},
-				Data: map[string]string{
-					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
-kind: AuthenticationConfiguration
-jwt:
-- issuer:
-    url: https://greenhouse-watch.test.example.com
-    audiences:
-    - audience-v1
-  claimMappings:
-    username:
-      claim: sub
-      prefix: 'greenhouse-v1:'
-`,
-				},
-			}
-			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthConfigMap)).To(Succeed(), "should create Greenhouse auth ConfigMap")
-		})
-
-		It("should re-reconcile shoots when Greenhouse auth CM is updated", func() {
-			// Create a shoot that matches the selector
-			shoot := &gardenerv1beta1.Shoot{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-shoot-watch",
-					Namespace: "default",
-					Labels: map[string]string{
-						"test": "watch",
-					},
-				},
-			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
-
-			shoot.Status = gardenerv1beta1.ShootStatus{
-				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
-					{
-						Name: "external",
-						URL:  "https://api-server.test-shoot-watch.example.com",
-					},
-				},
-			}
-			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
-
-			// Create CA ConfigMap
-			caCM := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-shoot-watch.ca-cluster",
-					Namespace: "default",
-				},
-				Data: map[string]string{"ca.crt": "test-ca-data"},
-			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, caCM)).To(Succeed(), "should create CA ConfigMap")
-
-			gardenAuthCMName := "test-careinstruction-watch-greenhouse-auth"
-
-			// Step 1: wait for the initial Garden auth CM to be created with the v1 audience
-			Eventually(func(g Gomega) {
-				authCM := &corev1.ConfigMap{}
-				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      gardenAuthCMName,
-					Namespace: "default",
-				}, authCM)).To(Succeed(), "should find Garden auth ConfigMap")
-
-				var authConfig apiserverv1beta1.AuthenticationConfiguration
-				g.Expect(yaml.Unmarshal([]byte(authCM.Data["config.yaml"]), &authConfig)).To(Succeed())
-				g.Expect(authConfig.JWT).To(HaveLen(1))
-				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse-watch.test.example.com"))
-				g.Expect(authConfig.JWT[0].Issuer.Audiences).To(ConsistOf("audience-v1"))
-			}).Should(Succeed(), "initial Garden auth CM should contain v1 audience")
-
-			// Step 2: wait for the controller to label the Greenhouse auth CM.
-			// This adds CareInstructionLabel, enabling the watch predicate to match future updates.
-			Eventually(func(g Gomega) {
-				var ghCM corev1.ConfigMap
-				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      "greenhouse-auth-config-watch",
-					Namespace: "default",
-				}, &ghCM)).To(Succeed())
-				g.Expect(ghCM.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, careInstruction.Name),
-					"controller should have added CareInstructionLabel to Greenhouse auth CM")
-			}).Should(Succeed(), "Greenhouse auth CM should be labeled with CareInstructionLabel before proceeding")
-
-			// Step 3: update the Greenhouse auth CM — same issuer URL, but new audience and prefix.
-			// Keeping the same URL ensures mergeAuthenticationConfigurations replaces the existing
-			// entry in-place rather than appending a second issuer. The watch (source.Kind on the
-			// Greenhouse cache) fires because the CM has both required labels and its content changed.
-			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKey{
-				Name:      "greenhouse-auth-config-watch",
-				Namespace: "default",
-			}, greenhouseAuthConfigMap)).To(Succeed(), "should fetch latest Greenhouse auth CM")
-			greenhouseAuthConfigMap.Data["config.yaml"] = `apiVersion: apiserver.config.k8s.io/v1beta1
-kind: AuthenticationConfiguration
-jwt:
-- issuer:
-    url: https://greenhouse-watch.test.example.com
-    audiences:
-    - audience-v2
-  claimMappings:
-    username:
-      claim: sub
-      prefix: 'greenhouse-v2:'
-`
-			Expect(test.K8sClient.Update(test.Ctx, greenhouseAuthConfigMap)).To(Succeed(),
-				"should update Greenhouse auth CM to trigger watch-based reconciliation")
-
-			// Step 4: the watch fires -> shoots are re-enqueued -> controller reconciles ->
-			// Garden auth CM is updated in-place to reflect the new audience (v2).
-			// The issuer count stays at 1 because the URL matches and the entry is replaced.
-			Eventually(func(g Gomega) {
-				authCM := &corev1.ConfigMap{}
-				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      gardenAuthCMName,
-					Namespace: "default",
-				}, authCM)).To(Succeed())
-
-				var authConfig apiserverv1beta1.AuthenticationConfiguration
-				g.Expect(yaml.Unmarshal([]byte(authCM.Data["config.yaml"]), &authConfig)).To(Succeed())
-				g.Expect(authConfig.JWT).To(HaveLen(1), "should still have exactly one issuer (replaced in-place)")
-				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse-watch.test.example.com"))
-				// audience-v2 proves the Garden CM was re-reconciled from the updated Greenhouse CM
-				g.Expect(authConfig.JWT[0].Issuer.Audiences).To(ConsistOf("audience-v2"),
-					"Garden auth CM should have updated audience after Greenhouse CM change triggers watch")
-				g.Expect(authConfig.JWT[0].ClaimMappings.Username.Prefix).NotTo(BeNil())
-				g.Expect(*authConfig.JWT[0].ClaimMappings.Username.Prefix).To(Equal("greenhouse-v2:"))
-			}).Should(Succeed(), "Garden auth CM should be re-reconciled to v2 config after Greenhouse CM change triggers watch")
-		})
-	})
-
 	When("using ShootSelector.Expression with CEL expression", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
@@ -2127,10 +1961,9 @@ jwt:
 					AuthenticationConfigMapName: "greenhouse-oidc-config",
 				},
 			}
-		})
 
-		It("should NOT annotate Shoot when setting up OIDC for the first time", func() {
-			// Create Greenhouse auth ConfigMap
+			// Create Greenhouse auth ConfigMap in BeforeEach so JustBeforeEach can fetch its data
+			// for AuthConfigMapData (which is passed in-memory to the ShootController).
 			greenhouseAuthCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "greenhouse-oidc-config",
@@ -2152,7 +1985,9 @@ jwt:
 				},
 			}
 			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
+		})
 
+		It("should NOT annotate Shoot when setting up OIDC for the first time", func() {
 			// Create a shoot without any OIDC configuration
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2215,28 +2050,7 @@ jwt:
 		})
 
 		It("should annotate Shoot with gardener.cloud/operation=reconcile when ConfigMap content changes", func() {
-			// Create Greenhouse auth ConfigMap
-			greenhouseAuthCM := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "greenhouse-oidc-config",
-					Namespace: "default",
-				},
-				Data: map[string]string{
-					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
-kind: AuthenticationConfiguration
-jwt:
-- issuer:
-    url: https://greenhouse.example.com
-    audiences:
-    - greenhouse
-  claimMappings:
-    username:
-      claim: sub
-      prefix: 'greenhouse:'
-`,
-				},
-			}
-			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
+			// Note: the Greenhouse auth ConfigMap was created in BeforeEach.
 
 			// Create a shoot that ALREADY has the OIDC ConfigMap reference
 			shoot := &gardenerv1beta1.Shoot{
