@@ -295,7 +295,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		Logger:           r.WithValues("careInstruction", careInstruction.Name),
 		Name:             shoot.GenerateName(careInstruction.Name),
 		CareInstruction:  careInstruction.DeepCopy(),
-		EventRecorder:    r.GetEventRecorderFor(shoot.GenerateName(careInstruction.Name)),
+		EventRecorder:    r.GetEventRecorderFor(shoot.GenerateName(careInstruction.Name)), //nolint:staticcheck // GetEventRecorder returns the new events.EventRecorder which is incompatible with record.EventRecorder
 	}
 	if err := sc.SetupWithManager(shootControllerMgr); err != nil {
 		return err
