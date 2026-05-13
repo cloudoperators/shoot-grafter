@@ -81,7 +81,7 @@ var _ = Describe("Shoot Controller", func() {
 			Logger:           ctrl.Log.WithName("controllers").WithName("ShootController"),
 			Name:             "ShootController",
 			CareInstruction:  careInstruction,
-			EventRecorder:    greenhouseMgr.GetEventRecorderFor("ShootController"), //nolint:staticcheck // GetEventRecorder returns the new events.EventRecorder which is incompatible with record.EventRecorder
+			EventRecorder:    greenhouseMgr.GetEventRecorder("ShootController"),
 		}).SetupWithManager(mgr)).To(Succeed(), "there must be no error setting up the controller with the manager")
 
 		careInstructionWebhook := &webhookv1alpha1.CareInstructionWebhook{}
