@@ -64,14 +64,14 @@ type careInstructionContextKey struct{}
 // +kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Auth ConfigMap predicate: only re-enqueue the CareInstruction when ConfigMap Data changes.
-	// Label-only patches (e.g. from our own MergeFrom calls in auth.go) are ignored.
+	// Auth ConfigMap predicate: re-enqueue on Create (covers late-appearing or recreated ConfigMaps)
+	// and on Update only when Data changes (ignores label-only patches from auth.go).
 	authCMDataChangedPredicate := predicate.Funcs{
-		CreateFunc: func(_ event.CreateEvent) bool { return false },
+		CreateFunc: func(_ event.CreateEvent) bool { return true },
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			oldCM, ok1 := e.ObjectOld.(*corev1.ConfigMap)
 			newCM, ok2 := e.ObjectNew.(*corev1.ConfigMap)
@@ -228,7 +228,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	// Fetch the current auth ConfigMap data so we can detect changes and pass it to the ShootController.
 	currentAuthCMData, authCMErr := r.fetchAuthConfigMapData(ctx, &careInstruction)
-	if authCMErr != nil && !apierrors.IsNotFound(authCMErr) {
+	if authCMErr != nil {
 		r.Info("failed to fetch auth ConfigMap data, will proceed without it", "error", authCMErr)
 	}
 
@@ -665,6 +665,9 @@ func (r *CareInstructionReconciler) fetchAuthConfigMapData(ctx context.Context, 
 		Namespace: careInstruction.Namespace,
 		Name:      careInstruction.Spec.AuthenticationConfigMapName,
 	}, &cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return cm.Data, nil

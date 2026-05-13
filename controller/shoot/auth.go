@@ -11,6 +11,7 @@ import (
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apiserverv1beta1 "k8s.io/apiserver/pkg/apis/apiserver/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,7 +42,12 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 	if err := r.GreenhouseClient.Get(ctx, client.ObjectKey{
 		Namespace: r.CareInstruction.Namespace,
 		Name:      r.CareInstruction.Spec.AuthenticationConfigMapName,
-	}, &greenhouseAuthConfigMap); err == nil {
+	}, &greenhouseAuthConfigMap); err != nil {
+		if !errors.IsNotFound(err) {
+			r.Info("failed to fetch auth ConfigMap for labeling; skipping label patch",
+				"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName, "error", err)
+		}
+	} else {
 		base := greenhouseAuthConfigMap.DeepCopy()
 		if greenhouseAuthConfigMap.Labels == nil {
 			greenhouseAuthConfigMap.Labels = make(map[string]string)
