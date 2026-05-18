@@ -129,15 +129,21 @@ linters:
       replace-allow-list:
         # for go-pmtud
         - github.com/mdlayher/arp
-        # for github.com/sapcc/vpa_butler
-        - k8s.io/client-go
-        # synced from greenhouse v0.9.0
+        # synced from greenhouse v0.11.1
         - github.com/fluxcd/helm-controller/api
         - github.com/fluxcd/kustomize-controller/api
         - github.com/fluxcd/pkg/apis/kustomize
         - github.com/fluxcd/pkg/apis/meta
         - github.com/fluxcd/source-controller/api
         - github.com/fluxcd/source-watcher/api/v2
+        - k8s.io/api
+        - k8s.io/apiextensions-apiserver
+        - k8s.io/apimachinery
+        - k8s.io/cli-runtime
+        - k8s.io/client-go
+        - k8s.io/component-base
+        - k8s.io/kubectl
+        - sigs.k8s.io/controller-runtime
       toolchain-forbidden: true
       go-version-pattern: 1\.\d+(\.0)?$
     gosec:

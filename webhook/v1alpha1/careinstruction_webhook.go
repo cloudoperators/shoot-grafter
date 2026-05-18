@@ -5,11 +5,10 @@ package v1alpha1
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"shoot-grafter/api/v1alpha1"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -19,17 +18,15 @@ type CareInstructionWebhook struct{}
 
 // SetupWebhookWithManager sets up the webhook with the manager.
 func (r *CareInstructionWebhook) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&v1alpha1.CareInstruction{}).
+	return ctrl.NewWebhookManagedBy(mgr, &v1alpha1.CareInstruction{}).
 		WithDefaulter(&CareInstructionWebhook{}).
 		Complete()
 }
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
-func (r *CareInstructionWebhook) Default(ctx context.Context, obj runtime.Object) error {
-	careInstruction, ok := obj.(*v1alpha1.CareInstruction)
-	if !ok {
-		return fmt.Errorf("expected CareInstruction, got %T", obj)
+func (r *CareInstructionWebhook) Default(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+	if careInstruction == nil {
+		return errors.New("expected CareInstruction, got nil")
 	}
 
 	if careInstruction.Spec.ShootSelector == nil {
