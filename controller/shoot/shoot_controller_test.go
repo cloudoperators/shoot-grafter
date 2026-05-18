@@ -313,6 +313,7 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
+							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
 					},
@@ -392,6 +393,7 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
+							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
 					},
@@ -410,6 +412,7 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
+							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-2.example.com",
 						},
 					},
@@ -488,6 +491,7 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
+							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
 					},
@@ -577,6 +581,7 @@ var _ = Describe("Shoot Controller", func() {
 				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
 
 				// Check that controller-managed annotations are present
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("greenhouse.sap/propagate-labels", "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction"))
 				g.Expect(secret.Annotations).To(HaveKeyWithValue(greenhouseapis.SecretAPIServerURLAnnotation, "https://api-server.test-shoot-merge.example.com"))
 
 				// Check that external annotation is preserved
@@ -671,6 +676,7 @@ var _ = Describe("Shoot Controller", func() {
 				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
 
 				// Check that controller-managed annotations are present
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("greenhouse.sap/propagate-labels", "test/*,quux,shoot-grafter.cloudoperators.dev/careinstruction"))
 				g.Expect(secret.Annotations).To(HaveKeyWithValue(greenhouseapis.SecretAPIServerURLAnnotation, "https://api-server.test-shoot-merge.example.com"))
 
 				// Check that external annotation is preserved
@@ -766,6 +772,7 @@ var _ = Describe("Shoot Controller", func() {
 					"quux": "corge",
 				}), "should have the expected labels")
 				g.Expect(secret.Annotations).To(Equal(map[string]string{
+					"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 					greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot.example.com",
 				}), "should have the expected annotations")
 				g.Expect(secret.Data).To(HaveKeyWithValue("ca.crt", []byte(base64.StdEncoding.EncodeToString([]byte("test-ca-data")))), "should have the expected data")

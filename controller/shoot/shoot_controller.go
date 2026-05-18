@@ -149,18 +149,25 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
+	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
+
 	// Initialize secret labels based on CareInstruction
 	secretLabels := make(map[string]string)
 
 	// Get additional labels to set on the Secret
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
-		maps.Copy(secretLabels, r.CareInstruction.Spec.AdditionalLabels)
+		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
+			secretLabels[k] = v
+			labelKeysToPropagate = append(labelKeysToPropagate, k)
+		}
 	}
 
 	// Set the identifying label
 	secretLabels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
+	labelKeysToPropagate = append(labelKeysToPropagate, v1alpha1.CareInstructionLabel)
 
 	secretAnnotations := map[string]string{
+		"greenhouse.sap/propagate-labels":           strings.Join(labelKeysToPropagate, ","),
 		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
 	}
 
