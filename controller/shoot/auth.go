@@ -11,6 +11,7 @@ import (
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apiserverv1beta1 "k8s.io/apiserver/pkg/apis/apiserver/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -22,39 +23,64 @@ import (
 const authConfigMapKey = "config.yaml"
 
 // configureOIDCAuthentication configures OIDC authentication for the Shoot by:
-// 1. Fetching the AuthenticationConfiguration ConfigMap from Greenhouse cluster
+// 1. Reading the AuthenticationConfiguration from the in-memory auth ConfigMap data (provided by the CareInstruction controller)
 // 2. Merging it with any existing configuration on the Garden cluster
 // 3. Updating the Shoot spec to reference the merged configuration
 func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) error {
-	// Fetch the AuthenticationConfiguration ConfigMap from Greenhouse cluster
+	// Label the Greenhouse auth ConfigMap so the CareInstruction controller's watch predicate can
+	// identify it and associate it with this CareInstruction.
+	// We fetch the live CM to get the current metadata, then patch only the labels.
 	var greenhouseAuthConfigMap corev1.ConfigMap
 	if err := r.GreenhouseClient.Get(ctx, client.ObjectKey{
 		Namespace: r.CareInstruction.Namespace,
 		Name:      r.CareInstruction.Spec.AuthenticationConfigMapName,
 	}, &greenhouseAuthConfigMap); err != nil {
-		return fmt.Errorf("failed to fetch AuthenticationConfiguration ConfigMap %s from Greenhouse cluster: %w",
-			r.CareInstruction.Spec.AuthenticationConfigMapName, err)
-	}
+		if !errors.IsNotFound(err) {
+			r.Info("failed to fetch auth ConfigMap for labeling; skipping label patch",
+				"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName, "error", err)
+		}
+	} else {
+		base := greenhouseAuthConfigMap.DeepCopy()
+		if greenhouseAuthConfigMap.Labels == nil {
+			greenhouseAuthConfigMap.Labels = make(map[string]string)
+		}
+		labelsNeedUpdate := false
 
-	// Add the auth ConfigMap label if it doesn't exist
-	if greenhouseAuthConfigMap.Labels == nil {
-		greenhouseAuthConfigMap.Labels = make(map[string]string)
-	}
-	if _, hasLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasLabel {
-		greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
-		if err := r.GreenhouseClient.Update(ctx, &greenhouseAuthConfigMap); err != nil {
-			r.Info("failed to add auth ConfigMap label", "configMap", greenhouseAuthConfigMap.Name, "error", err)
-			// Don't fail the reconciliation for this, just log it
+		// If the CM is already owned by a different CareInstruction, skip relabelling.
+		existingOwner, hasCILabel := greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel]
+		if hasCILabel && existingOwner != r.CareInstruction.Name {
+			r.Info("auth ConfigMap is already owned by another CareInstruction; skipping relabel",
+				"configMap", greenhouseAuthConfigMap.Name,
+				"existingOwner", existingOwner,
+				"thisCareInstruction", r.CareInstruction.Name)
+		} else {
+			if _, hasAuthLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasAuthLabel {
+				greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+				labelsNeedUpdate = true
+			}
+			if !hasCILabel {
+				greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
+				labelsNeedUpdate = true
+			}
+		}
+
+		if labelsNeedUpdate {
+			if patchErr := r.GreenhouseClient.Patch(ctx, &greenhouseAuthConfigMap, client.MergeFrom(base)); patchErr != nil {
+				r.Info("failed to patch labels on auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", patchErr)
+			}
 		}
 	}
 
-	// Verify the ConfigMap contains config.yaml
-	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data[authConfigMapKey] == "" {
-		return fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain config.yaml",
-			r.CareInstruction.Spec.AuthenticationConfigMapName)
+	// Use the in-memory auth ConfigMap data provided by the CareInstruction controller.
+	// This avoids a cross-cluster watch; the CareInstruction controller is responsible for
+	// fetching and caching the data, and restarts this ShootController when it changes.
+	if r.AuthConfigMapData == nil || r.AuthConfigMapData[authConfigMapKey] == "" {
+		r.Info("auth ConfigMap data not yet available, skipping OIDC configuration",
+			"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName)
+		return nil
 	}
 
-	// Parse the Greenhouse authentication configuration
+	// Parse the Greenhouse authentication configuration from in-memory data
 	var greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration
 	if err := yaml.Unmarshal([]byte(greenhouseAuthConfigMap.Data[authConfigMapKey]), &greenhouseAuthConfig); err != nil {
 		return fmt.Errorf("failed to parse Greenhouse AuthenticationConfiguration: %w", err)

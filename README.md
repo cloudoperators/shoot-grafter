@@ -145,8 +145,10 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Extracts cluster connection details (API server URL, CA certificate)
 - Creates or updates corresponding Secret resources with OIDC configuration
 - Generates Greenhouse Cluster resources with appropriate labels
-- Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc_connectivity/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
+- Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc-login/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
+
+> **Auth ConfigMap labeling & watch**: When `authenticationConfigMapName` is set, the shoot controller labels the referenced Greenhouse ConfigMap with `shoot-grafter.cloudoperators.dev/auth-configmap: "true"` and `shoot-grafter.cloudoperators.dev/careinstruction: <ci-name>` on first interaction (creation or update). The CareInstruction controller watches these labeled ConfigMaps on the Greenhouse cluster; any change to the auth ConfigMap re-enqueues the owning CareInstruction, which detects the data change and restarts the ShootController with the updated config so the Garden-side OIDC configuration stays in sync without waiting for the next Shoot event.
 
 ## Custom Resource: CareInstruction
 
@@ -208,7 +210,7 @@ spec:
 | `shootSelector.expression` | string | No | CEL expression for filtering shoots by status or other fields (max 1024 chars). The shoot object is available as `object` |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
-| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)|
+| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster). The ConfigMap is labeled by the shoot controller on first interaction and watched for changes to trigger automatic re-reconciliation of Shoots. |
 | `enableRBAC` | bool | No | When false, skips automatic RBAC setup on Shoot clusters (default: true‚) |
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
