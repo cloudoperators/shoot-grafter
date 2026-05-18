@@ -10,34 +10,39 @@ import (
 	"shoot-grafter/api/v1alpha1"
 )
 
+const metricLabelCareInstruction = "care_instruction"
+const metricLabelNamespace = "namespace"
+const metricLabelGardenNamespace = "garden_namespace"
+const metricLabelShootName = "shoot_name"
+
 var (
 	TotalTargetShootsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_total_target_shoots",
 			Help: "Total number of shoots matching the CareInstruction label selector",
 		},
-		[]string{"care_instruction", "namespace", "garden_namespace"},
+		[]string{metricLabelCareInstruction, metricLabelNamespace, metricLabelGardenNamespace},
 	)
 	CreatedClustersGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_created_clusters",
 			Help: "Number of clusters created by the CareInstruction",
 		},
-		[]string{"care_instruction", "namespace", "garden_namespace"},
+		[]string{metricLabelCareInstruction, metricLabelNamespace, metricLabelGardenNamespace},
 	)
 	FailedClustersGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_failed_clusters",
 			Help: "Number of clusters failed to be created by the CareInstruction",
 		},
-		[]string{"care_instruction", "namespace", "garden_namespace"},
+		[]string{metricLabelCareInstruction, metricLabelNamespace, metricLabelGardenNamespace},
 	)
 	ShootOnboardedGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "shoot_grafter_shoot_onboarded",
 			Help: "Is shoot onboarded by the CareInstruction",
 		},
-		[]string{"care_instruction", "namespace", "garden_namespace", "shoot_name"},
+		[]string{metricLabelCareInstruction, metricLabelNamespace, metricLabelGardenNamespace, metricLabelShootName},
 	)
 )
 
@@ -59,9 +64,9 @@ func UpdateCareInstructionMetrics(careInstruction *v1alpha1.CareInstruction) {
 
 func updateTotalTargetShootsMetric(careInstruction *v1alpha1.CareInstruction) {
 	metricLabels := prometheus.Labels{
-		"care_instruction": careInstruction.Name,
-		"namespace":        careInstruction.Namespace,
-		"garden_namespace": careInstruction.Spec.GardenNamespace,
+		metricLabelCareInstruction: careInstruction.Name,
+		metricLabelNamespace:       careInstruction.Namespace,
+		metricLabelGardenNamespace: careInstruction.Spec.GardenNamespace,
 	}
 	totalTargetShoots := careInstruction.Status.TotalTargetShoots
 	TotalTargetShootsGauge.With(metricLabels).Set(float64(totalTargetShoots))
@@ -69,9 +74,9 @@ func updateTotalTargetShootsMetric(careInstruction *v1alpha1.CareInstruction) {
 
 func updateCreatedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 	metricLabels := prometheus.Labels{
-		"care_instruction": careInstruction.Name,
-		"namespace":        careInstruction.Namespace,
-		"garden_namespace": careInstruction.Spec.GardenNamespace,
+		metricLabelCareInstruction: careInstruction.Name,
+		metricLabelNamespace:       careInstruction.Namespace,
+		metricLabelGardenNamespace: careInstruction.Spec.GardenNamespace,
 	}
 	createdCount := careInstruction.Status.CreatedClusters
 	CreatedClustersGauge.With(metricLabels).Set(float64(createdCount))
@@ -79,9 +84,9 @@ func updateCreatedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 
 func updateFailedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 	metricLabels := prometheus.Labels{
-		"care_instruction": careInstruction.Name,
-		"namespace":        careInstruction.Namespace,
-		"garden_namespace": careInstruction.Spec.GardenNamespace,
+		metricLabelCareInstruction: careInstruction.Name,
+		metricLabelNamespace:       careInstruction.Namespace,
+		metricLabelGardenNamespace: careInstruction.Spec.GardenNamespace,
 	}
 	failedCount := careInstruction.Status.FailedClusters
 	FailedClustersGauge.With(metricLabels).Set(float64(failedCount))
@@ -90,10 +95,10 @@ func updateFailedClustersMetric(careInstruction *v1alpha1.CareInstruction) {
 func updateOnboardedShootsMetrics(careInstruction *v1alpha1.CareInstruction) {
 	for _, ss := range careInstruction.Status.Shoots {
 		metricLabels := prometheus.Labels{
-			"care_instruction": careInstruction.Name,
-			"namespace":        careInstruction.Namespace,
-			"garden_namespace": careInstruction.Spec.GardenNamespace,
-			"shoot_name":       ss.Name,
+			metricLabelCareInstruction: careInstruction.Name,
+			metricLabelNamespace:       careInstruction.Namespace,
+			metricLabelGardenNamespace: careInstruction.Spec.GardenNamespace,
+			metricLabelShootName:       ss.Name,
 		}
 		if ss.Status == v1alpha1.ShootStatusOnboarded {
 			ShootOnboardedGauge.With(metricLabels).Set(float64(1))

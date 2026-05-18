@@ -81,7 +81,7 @@ var _ = Describe("Shoot Controller", func() {
 			Logger:           ctrl.Log.WithName("controllers").WithName("ShootController"),
 			Name:             "ShootController",
 			CareInstruction:  careInstruction,
-			EventRecorder:    greenhouseMgr.GetEventRecorderFor("ShootController"), // Get EventRecorder from Greenhouse manager
+			EventRecorder:    greenhouseMgr.GetEventRecorder("ShootController"),
 		}).SetupWithManager(mgr)).To(Succeed(), "there must be no error setting up the controller with the manager")
 
 		careInstructionWebhook := &webhookv1alpha1.CareInstructionWebhook{}
@@ -313,7 +313,6 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/last-applied-propagator":    "{\"labelKeys\":[\"foo\",\"baz\"]}",
 							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
@@ -394,7 +393,6 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/last-applied-propagator":    "{\"labelKeys\":[\"foo\",\"baz\"]}",
 							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
@@ -414,7 +412,6 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/last-applied-propagator":    "{\"labelKeys\":[\"foo\",\"baz\"]}",
 							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-2.example.com",
 						},
@@ -494,7 +491,6 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/last-applied-propagator":    "{\"labelKeys\":[\"foo\",\"baz\"]}",
 							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
 						},
@@ -776,7 +772,6 @@ var _ = Describe("Shoot Controller", func() {
 					"quux": "corge",
 				}), "should have the expected labels")
 				g.Expect(secret.Annotations).To(Equal(map[string]string{
-					"greenhouse.sap/last-applied-propagator":    "{\"labelKeys\":[\"foo\",\"baz\"]}",
 					"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 					greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot.example.com",
 				}), "should have the expected annotations")
