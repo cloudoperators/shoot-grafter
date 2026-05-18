@@ -20,7 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,13 +40,13 @@ type ShootController struct {
 	logr.Logger
 	Name            string
 	CareInstruction *v1alpha1.CareInstruction
-	EventRecorder   record.EventRecorder // EventRecorder to emit events on the Greenhouse cluster
+	EventRecorder   events.EventRecorder // EventRecorder to emit events on the Greenhouse cluster
 }
 
 // emitEvent safely emits an event if EventRecorder is available
 func (r *ShootController) emitEvent(object client.Object, eventType, reason, message string) {
 	if r.EventRecorder != nil {
-		r.EventRecorder.Event(object, eventType, reason, message)
+		r.EventRecorder.Eventf(object, nil, eventType, reason, reason, "%s", message)
 	} else {
 		r.Info("Event (EventRecorder not available)", "type", eventType, "reason", reason, "message", message)
 	}
@@ -148,13 +148,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// Specify which labels to propagate from the Shoot to the Secret - LabelPropagator needs to have the labels set on the source object.
-	// TODO: change when LabelPropagator is extended to accommodate this scenario.
-	if shoot.Annotations == nil {
-		shoot.Annotations = make(map[string]string)
-	}
-	shoot.Annotations[lifecycle.PropagateLabelsAnnotation] = strings.Join(r.CareInstruction.Spec.PropagateLabels, ",")
-
 	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
 	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
 
@@ -227,8 +220,8 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		maps.Copy(secret.Labels, secretLabels)
 
-		// Transport Shoot labels to the Secret
-		secret = (lifecycle.NewPropagator(&shoot, secret).Apply()).(*corev1.Secret)
+		// Copy Shoot labels to the Secret
+		secret = (lifecycle.NewPropagator(&shoot, secret).CopyLabels(r.CareInstruction.Spec.PropagateLabels)).(*corev1.Secret)
 		return nil
 	})
 	if err != nil {
