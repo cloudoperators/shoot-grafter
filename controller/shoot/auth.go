@@ -27,14 +27,6 @@ const authConfigKey = "config.yaml"
 // 2. Merging it with any existing configuration on the Garden cluster
 // 3. Updating the Shoot spec to reference the merged configuration
 func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) error {
-	// Use the in-memory auth ConfigMap data provided by the CareInstruction controller.
-	// This avoids a cross-cluster watch; the CareInstruction controller is responsible for
-	// fetching and caching the data, and restarts this ShootController when it changes.
-	if r.AuthConfigMapData == nil || r.AuthConfigMapData[authConfigKey] == "" {
-		return fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain config.yaml (data not available)",
-			r.CareInstruction.Spec.AuthenticationConfigMapName)
-	}
-
 	// Label the Greenhouse auth ConfigMap so the CareInstruction controller's watch predicate can
 	// identify it and associate it with this CareInstruction.
 	// We fetch the live CM to get the current metadata, then patch only the labels.
@@ -77,6 +69,15 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 				r.Info("failed to patch labels on auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", patchErr)
 			}
 		}
+	}
+
+	// Use the in-memory auth ConfigMap data provided by the CareInstruction controller.
+	// This avoids a cross-cluster watch; the CareInstruction controller is responsible for
+	// fetching and caching the data, and restarts this ShootController when it changes.
+	if r.AuthConfigMapData == nil || r.AuthConfigMapData[authConfigKey] == "" {
+		r.Info("auth ConfigMap data not yet available, skipping OIDC configuration",
+			"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName)
+		return nil
 	}
 
 	// Parse the Greenhouse authentication configuration from in-memory data

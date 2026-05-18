@@ -229,7 +229,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	// Fetch the current auth ConfigMap data so we can detect changes and pass it to the ShootController.
 	currentAuthCMData, authCMErr := r.fetchAuthConfigMapData(ctx, &careInstruction)
 	if authCMErr != nil {
-		r.Info("failed to fetch auth ConfigMap data, will proceed without it", "error", authCMErr)
+		r.Info("auth ConfigMap data unavailable, OIDC configuration will be skipped until ConfigMap is readable", "error", authCMErr)
 	}
 
 	// Now we check the following to see if we need to recreate and restart the manager (with read lock):
