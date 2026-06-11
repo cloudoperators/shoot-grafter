@@ -17,6 +17,7 @@ var knownConditionTypes = []greenhousemetav1alpha1.ConditionType{
 	v1alpha1.GardenClusterAccessReady,
 	v1alpha1.ShootControllerStartedCondition,
 	v1alpha1.ShootsReconciledCondition,
+	v1alpha1.AuthCMFoundCondition,
 }
 
 // InitializeConditionsToUnknown initializes all known conditions to unknown if they are not set yet.

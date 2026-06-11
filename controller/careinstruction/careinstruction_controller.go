@@ -213,6 +213,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	currentAuthCMData, authCMErr := r.fetchAuthConfigMapData(ctx, &careInstruction)
 	if authCMErr != nil {
 		r.Info("auth ConfigMap data unavailable, OIDC configuration will be skipped until ConfigMap is readable", "error", authCMErr)
+		careInstruction.Status.SetConditions(greenhousemetav1alpha1.FalseCondition(v1alpha1.AuthCMFoundCondition, "AuthCMNotFound", authCMErr.Error()))
+	} else if currentAuthCMData != nil {
+		careInstruction.Status.SetConditions(greenhousemetav1alpha1.TrueCondition(v1alpha1.AuthCMFoundCondition, "AuthCMFound", ""))
 	}
 
 	// Now we check the following to see if we need to recreate and restart the manager (with read lock):
@@ -638,7 +641,7 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(_ con
 }
 
 // fetchAuthConfigMapData fetches the current Data of the auth ConfigMap referenced by the CareInstruction.
-// Returns nil (no error) when no auth ConfigMap is configured or the CM does not exist yet.
+// Returns nil (no error) when no auth ConfigMap is configured.
 func (r *CareInstructionReconciler) fetchAuthConfigMapData(ctx context.Context, careInstruction *v1alpha1.CareInstruction) (map[string]string, error) {
 	if careInstruction.Spec.AuthenticationConfigMapName == "" {
 		return nil, nil
@@ -648,9 +651,6 @@ func (r *CareInstructionReconciler) fetchAuthConfigMapData(ctx context.Context, 
 		Namespace: careInstruction.Namespace,
 		Name:      careInstruction.Spec.AuthenticationConfigMapName,
 	}, &cm); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	return cm.Data, nil
