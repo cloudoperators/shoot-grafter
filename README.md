@@ -145,7 +145,7 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Extracts cluster connection details (API server URL, CA certificate)
 - Creates or updates corresponding Secret resources with OIDC configuration
 - Generates Greenhouse Cluster resources with appropriate labels
-- Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc-login/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
+- Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc_connectivity/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
 
 > **Auth ConfigMap labeling & watch**: When `authenticationConfigMapName` is set, the shoot controller labels the referenced Greenhouse ConfigMap with `shoot-grafter.cloudoperators.dev/auth-configmap: "true"` and `shoot-grafter.cloudoperators.dev/careinstruction: <ci-name>` on first interaction (creation or update). The CareInstruction controller watches these labeled ConfigMaps on the Greenhouse cluster; any change to the auth ConfigMap re-enqueues the owning CareInstruction, which detects the data change and restarts the ShootController with the updated config so the Garden-side OIDC configuration stays in sync without waiting for the next Shoot event.

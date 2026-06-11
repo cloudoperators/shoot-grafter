@@ -19,11 +19,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
@@ -68,21 +66,6 @@ type careInstructionContextKey struct{}
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Auth ConfigMap predicate: re-enqueue on Create (covers late-appearing or recreated ConfigMaps)
-	// and on Update only when Data changes (ignores label-only patches from auth.go).
-	authCMDataChangedPredicate := predicate.Funcs{
-		CreateFunc: func(_ event.CreateEvent) bool { return true },
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldCM, ok1 := e.ObjectOld.(*corev1.ConfigMap)
-			newCM, ok2 := e.ObjectNew.(*corev1.ConfigMap)
-			if !ok1 || !ok2 {
-				return false
-			}
-			return !maps.Equal(oldCM.Data, newCM.Data)
-		},
-		DeleteFunc: func(_ event.DeleteEvent) bool { return false },
-	}
-
 	// Setup the controller with the manager
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.CareInstruction{}).
@@ -94,7 +77,7 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForAuthConfigMap),
 			builder.WithPredicates(
 				clientutil.PredicateHasLabel(v1alpha1.AuthConfigMapLabel),
-				authCMDataChangedPredicate,
+				clientutil.PredicateConfigMapDataChanged(),
 			),
 		).
 		Complete(r)
