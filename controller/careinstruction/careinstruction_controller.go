@@ -229,7 +229,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
 	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
-	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
+	// 5. If the auth ConfigMap data has changed, the ShootController must be restarted with the new data
+	authConfigMapDataChanged := !maps.Equal(garden.authConfigMapData, currentAuthCMData)
+	// 6. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
 	channelExists := garden.stopChan != nil
 	channelOpen := true
 	if channelExists {
@@ -242,11 +244,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			channelOpen = true
 		}
 	}
-	// 6. If the auth ConfigMap data has changed, the ShootController must be restarted with the new data
-	authConfigMapDataChanged := !maps.Equal(garden.authConfigMapData, currentAuthCMData)
 	r.gardensMu.RUnlock()
 
-	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen && !authConfigMapDataChanged {
+	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && !authConfigMapDataChanged && channelOpen {
 		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
 		return nil
 	}
