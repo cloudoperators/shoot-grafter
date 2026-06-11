@@ -6,7 +6,6 @@ package careinstruction
 import (
 	"context"
 	"errors"
-	"maps"
 	"reflect"
 	"sync"
 
@@ -53,7 +52,6 @@ type garden struct {
 	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
 	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
 	stopChan            chan bool                     // Channel to know if the manager is stopped
-	authConfigMapData   map[string]string             // In-memory cache of the latest auth ConfigMap Data
 }
 
 type careInstructionContextKey struct{}
@@ -183,7 +181,6 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			gardenClient:        nil,
 			careInstructionSpec: &careInstruction.Spec,
 			cancelFunc:          nil,
-			authConfigMapData:   nil,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -209,12 +206,11 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		),
 	)
 
-	// Fetch the current auth ConfigMap data so we can detect changes and pass it to the ShootController.
-	currentAuthCMData, authCMErr := r.fetchAuthConfigMapData(ctx, &careInstruction)
-	if authCMErr != nil {
-		r.Info("auth ConfigMap data unavailable, OIDC configuration will be skipped until ConfigMap is readable", "error", authCMErr)
+	// Fetch the current auth ConfigMap to set the AuthCMFoundCondition.
+	if authCMErr := r.checkAuthConfigMap(ctx, &careInstruction); authCMErr != nil {
+		r.Info("auth ConfigMap unavailable", "error", authCMErr)
 		careInstruction.Status.SetConditions(greenhousemetav1alpha1.FalseCondition(v1alpha1.AuthCMFoundCondition, "AuthCMNotFound", authCMErr.Error()))
-	} else if currentAuthCMData != nil {
+	} else if careInstruction.Spec.AuthenticationConfigMapName != "" {
 		careInstruction.Status.SetConditions(greenhousemetav1alpha1.TrueCondition(v1alpha1.AuthCMFoundCondition, "AuthCMFound", ""))
 	}
 
@@ -229,9 +225,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
 	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
-	// 5. If the auth ConfigMap data has changed, the ShootController must be restarted with the new data
-	authConfigMapDataChanged := !maps.Equal(garden.authConfigMapData, currentAuthCMData)
-	// 6. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
+	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
 	channelExists := garden.stopChan != nil
 	channelOpen := true
 	if channelExists {
@@ -246,7 +240,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 	r.gardensMu.RUnlock()
 
-	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && !authConfigMapDataChanged && channelOpen {
+	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen {
 		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
 		return nil
 	}
@@ -264,8 +258,6 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		reason = "stop channel is missing"
 	case !channelOpen:
 		reason = "manager stop channel is closed"
-	case authConfigMapDataChanged:
-		reason = "auth ConfigMap data has changed"
 	default:
 		reason = "unknown reason"
 	}
@@ -314,15 +306,13 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	// Register the ShootController with the garden manager.
 	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster.
-	// AuthConfigMapData is passed in-memory from the CareInstruction controller, which owns the auth CM watch.
 	sc := &shoot.ShootController{
-		GreenhouseClient:  r.Client,
-		GardenClient:      gardenClient,
-		Logger:            r.WithValues("careInstruction", careInstruction.Name),
-		Name:              shoot.GenerateName(careInstruction.Name),
-		CareInstruction:   careInstruction.DeepCopy(),
-		EventRecorder:     r.GetEventRecorder(shoot.GenerateName(careInstruction.Name)),
-		AuthConfigMapData: currentAuthCMData,
+		GreenhouseClient: r.Client,
+		GardenClient:     gardenClient,
+		Logger:           r.WithValues("careInstruction", careInstruction.Name),
+		Name:             shoot.GenerateName(careInstruction.Name),
+		CareInstruction:  careInstruction.DeepCopy(),
+		EventRecorder:    r.GetEventRecorder(shoot.GenerateName(careInstruction.Name)),
 	}
 	if err := sc.SetupWithManager(shootControllerMgr); err != nil {
 		return err
@@ -340,7 +330,6 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	r.gardens[gardenKey].cancelFunc = cancel
 	r.gardens[gardenKey].stopChan = make(chan bool)
 	r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
-	r.gardens[gardenKey].authConfigMapData = currentAuthCMData
 	stopChan := r.gardens[gardenKey].stopChan
 	r.gardensMu.Unlock()
 
@@ -640,18 +629,15 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(_ con
 	}
 }
 
-// fetchAuthConfigMapData fetches the current Data of the auth ConfigMap referenced by the CareInstruction.
-// Returns nil (no error) when no auth ConfigMap is configured.
-func (r *CareInstructionReconciler) fetchAuthConfigMapData(ctx context.Context, careInstruction *v1alpha1.CareInstruction) (map[string]string, error) {
+// checkAuthConfigMap checks whether the auth ConfigMap referenced by the CareInstruction exists and is readable.
+// Returns nil when no auth ConfigMap is configured.
+func (r *CareInstructionReconciler) checkAuthConfigMap(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	if careInstruction.Spec.AuthenticationConfigMapName == "" {
-		return nil, nil
+		return nil
 	}
 	var cm corev1.ConfigMap
-	if err := r.Get(ctx, client.ObjectKey{
+	return r.Get(ctx, client.ObjectKey{
 		Namespace: careInstruction.Namespace,
 		Name:      careInstruction.Spec.AuthenticationConfigMapName,
-	}, &cm); err != nil {
-		return nil, err
-	}
-	return cm.Data, nil
+	}, &cm)
 }

@@ -64,20 +64,6 @@ var _ = Describe("Shoot Controller", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the garden manager")
 
-		// Set up the ShootController with the garden manager.
-		// If the CareInstruction references an auth ConfigMap, fetch its data so configureOIDCAuthentication
-		// can use it (in production this is passed in-memory by the CareInstruction controller).
-		var authConfigMapData map[string]string
-		if careInstruction.Spec.AuthenticationConfigMapName != "" {
-			var authCM corev1.ConfigMap
-			if err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
-				Namespace: careInstruction.Namespace,
-				Name:      careInstruction.Spec.AuthenticationConfigMapName,
-			}, &authCM); err == nil {
-				authConfigMapData = authCM.Data
-			}
-		}
-
 		// Build an event recorder backed by the Greenhouse cluster so events are emitted there.
 		// The garden manager's recorder would emit to the Garden cluster, but tests verify events
 		// on the Greenhouse cluster (test.K8sClient).
@@ -91,13 +77,12 @@ var _ = Describe("Shoot Controller", func() {
 		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager for event recording")
 
 		Expect((&shoot.ShootController{
-			GreenhouseClient:  test.K8sClient,
-			GardenClient:      test.GardenK8sClient,
-			Logger:            ctrl.Log.WithName("controllers").WithName("ShootController"),
-			Name:              "ShootController",
-			CareInstruction:   careInstruction,
-			EventRecorder:     greenhouseMgr.GetEventRecorder("ShootController"),
-			AuthConfigMapData: authConfigMapData,
+			GreenhouseClient: test.K8sClient,
+			GardenClient:     test.GardenK8sClient,
+			Logger:           ctrl.Log.WithName("controllers").WithName("ShootController"),
+			Name:             "ShootController",
+			CareInstruction:  careInstruction,
+			EventRecorder:    greenhouseMgr.GetEventRecorder("ShootController"),
 		}).SetupWithManager(mgr)).To(Succeed(), "there must be no error setting up the controller with the manager")
 
 		careInstructionWebhook := &webhookv1alpha1.CareInstructionWebhook{}
@@ -2045,10 +2030,10 @@ jwt:
 		})
 
 		It("should annotate Shoot with gardener.cloud/operation=reconcile when ConfigMap content changes", func() {
-			// The CareInstruction controller restarts the ShootController with updated AuthConfigMapData
-			// when the Greenhouse auth ConfigMap changes. We simulate that here by setting AuthConfigMapData
-			// to new content while the Garden OIDC ConfigMap already holds old content. On reconcile the
-			// ShootController updates the Garden CM and adds the reconcile annotation.
+			// Pre-populate the Garden OIDC ConfigMap with old content. The Greenhouse auth ConfigMap
+			// (created in BeforeEach) has audience "greenhouse". On reconcile the ShootController
+			// fetches the Greenhouse CM directly, detects the content difference, updates the Garden CM,
+			// and adds the reconcile annotation.
 
 			// Create a Shoot that already references the Garden OIDC ConfigMap
 			shoot := &gardenerv1beta1.Shoot{
@@ -2083,9 +2068,6 @@ jwt:
 			Expect(test.GardenK8sClient.Create(test.Ctx, caCM)).To(Succeed(), "should create CA ConfigMap")
 
 			// Pre-populate the Garden OIDC ConfigMap with old content (old audience).
-			// AuthConfigMapData (set in JustBeforeEach from the Greenhouse CM) holds the new content
-			// with audience "greenhouse" — simulating a CareInstruction-driven ShootController restart
-			// with refreshed data.
 			gardenOIDCCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-careinstruction-oidc-greenhouse-auth", Namespace: "default"},
 				Data: map[string]string{
@@ -2112,7 +2094,7 @@ jwt:
 				}, updatedShoot)).To(Succeed())
 				g.Expect(updatedShoot.Annotations).ToNot(BeNil(), "should have annotations")
 				g.Expect(updatedShoot.Annotations["gardener.cloud/operation"]).To(Equal("reconcile"),
-					"should have reconcile annotation because Garden CM content was updated from in-memory data")
+					"should have reconcile annotation because Garden CM content was updated")
 			}).Should(Succeed(), "should eventually add reconcile annotation to Shoot")
 		})
 	})

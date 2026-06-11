@@ -35,9 +35,8 @@ const (
 )
 
 type ShootController struct {
-	GreenhouseClient  client.Client
-	GardenClient      client.Client
-	AuthConfigMapData map[string]string // In-memory auth ConfigMap Data provided by the CareInstruction controller
+	GreenhouseClient client.Client
+	GardenClient     client.Client
 	logr.Logger
 	Name            string
 	CareInstruction *v1alpha1.CareInstruction

@@ -23,7 +23,7 @@ import (
 const authConfigMapKey = "config.yaml"
 
 // configureOIDCAuthentication configures OIDC authentication for the Shoot by:
-// 1. Reading the AuthenticationConfiguration from the in-memory auth ConfigMap data (provided by the CareInstruction controller)
+// 1. Reading the AuthenticationConfiguration from the Greenhouse auth ConfigMap
 // 2. Merging it with any existing configuration on the Garden cluster
 // 3. Updating the Shoot spec to reference the merged configuration
 func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) error {
@@ -71,16 +71,12 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		}
 	}
 
-	// Use the in-memory auth ConfigMap data provided by the CareInstruction controller.
-	// This avoids a cross-cluster watch; the CareInstruction controller is responsible for
-	// fetching and caching the data, and restarts this ShootController when it changes.
-	if r.AuthConfigMapData == nil || r.AuthConfigMapData[authConfigMapKey] == "" {
-		r.Info("auth ConfigMap data not yet available, skipping OIDC configuration",
+	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data[authConfigMapKey] == "" {
+		r.Info("auth ConfigMap has no data, skipping OIDC configuration",
 			"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName)
 		return nil
 	}
 
-	// Parse the Greenhouse authentication configuration from in-memory data
 	var greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration
 	if err := yaml.Unmarshal([]byte(greenhouseAuthConfigMap.Data[authConfigMapKey]), &greenhouseAuthConfig); err != nil {
 		return fmt.Errorf("failed to parse Greenhouse AuthenticationConfiguration: %w", err)
