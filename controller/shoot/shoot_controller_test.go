@@ -2094,5 +2094,85 @@ jwt:
 					"should have reconcile annotation because Garden CM content was updated")
 			}).Should(Succeed(), "should eventually add reconcile annotation to Shoot")
 		})
+
+		It("should re-run OIDC configuration when auth-cm-revision annotation is stamped on the Shoot", func() {
+			// This test validates the annotation fan-out path: the CareInstruction controller stamps
+			// AuthCMRevisionAnnotation on matching Shoots when the Greenhouse auth CM data changes.
+			// The ShootController picks this up as a normal Update event and re-runs configureOIDCAuthentication,
+			// which detects that the Garden-side CM content differs and sets gardener.cloud/operation=reconcile.
+
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-annotation-fanout",
+					Namespace: "default",
+					Labels:    map[string]string{"oidc-test": "true"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{Name: "external", URL: "https://api-server.test-shoot-annotation-fanout.example.com"},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			caCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-shoot-annotation-fanout.ca-cluster", Namespace: "default"},
+				Data:       map[string]string{"ca.crt": "test-ca-data"},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, caCM)).To(Succeed(), "should create CA ConfigMap")
+
+			// Wait for the initial Garden OIDC ConfigMap to be created (first reconcile completed).
+			Eventually(func(g Gomega) {
+				cm := &corev1.ConfigMap{}
+				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name: "test-careinstruction-oidc-greenhouse-auth", Namespace: "default",
+				}, cm)).To(Succeed())
+			}).Should(Succeed(), "should eventually create Garden OIDC ConfigMap")
+
+			// Update the Greenhouse auth CM data (new audience) to create a content difference.
+			greenhouseAuthCM := &corev1.ConfigMap{}
+			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKey{
+				Name: "greenhouse-oidc-config", Namespace: "default",
+			}, greenhouseAuthCM)).To(Succeed())
+			base := greenhouseAuthCM.DeepCopy()
+			greenhouseAuthCM.Data["config.yaml"] = `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse.example.com
+    audiences:
+    - new-audience
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'greenhouse:'
+`
+			Expect(test.K8sClient.Patch(test.Ctx, greenhouseAuthCM, client.MergeFrom(base))).To(Succeed(), "should patch Greenhouse auth CM")
+
+			// Simulate the CareInstruction controller fan-out: stamp auth-cm-revision on the Shoot.
+			updatedShoot := &gardenerv1beta1.Shoot{}
+			Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+				Name: "test-shoot-annotation-fanout", Namespace: "default",
+			}, updatedShoot)).To(Succeed())
+			shootBase := updatedShoot.DeepCopy()
+			if updatedShoot.Annotations == nil {
+				updatedShoot.Annotations = map[string]string{}
+			}
+			updatedShoot.Annotations[v1alpha1.AuthCMRevisionAnnotation] = greenhouseAuthCM.ResourceVersion
+			Expect(test.GardenK8sClient.Patch(test.Ctx, updatedShoot, client.MergeFrom(shootBase))).To(Succeed(), "should stamp auth-cm-revision annotation")
+
+			// The ShootController picks up the annotation Update event, re-runs configureOIDCAuthentication,
+			// detects the changed content, updates the Garden CM, and sets gardener.cloud/operation=reconcile.
+			Eventually(func(g Gomega) {
+				finalShoot := &gardenerv1beta1.Shoot{}
+				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name: "test-shoot-annotation-fanout", Namespace: "default",
+				}, finalShoot)).To(Succeed())
+				g.Expect(finalShoot.Annotations).ToNot(BeNil())
+				g.Expect(finalShoot.Annotations["gardener.cloud/operation"]).To(Equal("reconcile"),
+					"ShootController should set gardener.cloud/operation=reconcile after re-running OIDC config via annotation fan-out")
+			}).Should(Succeed(), "should eventually set gardener.cloud/operation=reconcile on Shoot")
+		})
 	})
 })
