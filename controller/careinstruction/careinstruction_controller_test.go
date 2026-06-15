@@ -1296,6 +1296,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName:           test.GardenClusterName,
+					GardenNamespace:             "default",
 					AuthenticationConfigMapName: "shared-auth-config",
 					ShootSelector: &v1alpha1.ShootSelector{
 						LabelSelector: &metav1.LabelSelector{
@@ -1313,6 +1314,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName:           test.GardenClusterName,
+					GardenNamespace:             "default",
 					AuthenticationConfigMapName: "shared-auth-config",
 					ShootSelector: &v1alpha1.ShootSelector{
 						LabelSelector: &metav1.LabelSelector{
@@ -1328,17 +1330,28 @@ var _ = Describe("CareInstruction Controller", func() {
 			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, sharedAuthCM))).To(Succeed())
 		})
 
-		It("should restart both ShootController managers when the shared auth ConfigMap data changes", func() {
+		It("should annotate matching Shoots when the shared auth ConfigMap data changes", func() {
+			By("Creating a Shoot on the Garden cluster matching the CI label selector")
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shared-auth-shoot",
+					Namespace: "default",
+					Labels:    map[string]string{"shared-auth": "true"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot on garden cluster")
+			defer func() {
+				Expect(client.IgnoreNotFound(test.GardenK8sClient.Delete(test.Ctx, shoot))).To(Succeed())
+			}()
+
 			By("Waiting for both CareInstructions to start their ShootController managers")
 			Eventually(func(g Gomega) {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed())
-				g.Expect(careInstruction1.Status.Conditions).ToNot(BeEmpty())
 				cond := careInstruction1.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
 				g.Expect(cond).ToNot(BeNil())
 				g.Expect(cond.IsTrue()).To(BeTrue())
 
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed())
-				g.Expect(careInstruction2.Status.Conditions).ToNot(BeEmpty())
 				cond2 := careInstruction2.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
 				g.Expect(cond2).ToNot(BeNil())
 				g.Expect(cond2.IsTrue()).To(BeTrue())
@@ -1349,25 +1362,35 @@ var _ = Describe("CareInstruction Controller", func() {
 			base := sharedAuthCM.DeepCopy()
 			sharedAuthCM.Data["config.yaml"] = "updated: data"
 			Expect(test.K8sClient.Patch(test.Ctx, sharedAuthCM, client.MergeFrom(base))).To(Succeed())
+			updatedRevision := sharedAuthCM.ResourceVersion
 
-			By("Expecting both CareInstructions to be re-reconciled (ShootControllerStarted condition refreshed)")
-			// We verify that both CIs are re-enqueued by checking that each still reports
-			// ShootControllerStarted=True after the CM change (the manager restart path keeps the condition True).
-			Consistently(func(g Gomega) {
-				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed())
-				cond := careInstruction1.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
-				g.Expect(cond).ToNot(BeNil())
-				g.Expect(cond.IsTrue()).To(BeTrue(), "CI 1 ShootController should still be running after CM change")
-
-				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed())
-				cond2 := careInstruction2.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
-				g.Expect(cond2).ToNot(BeNil())
-				g.Expect(cond2.IsTrue()).To(BeTrue(), "CI 2 ShootController should still be running after CM change")
-			}, "5s", "500ms").Should(Succeed(), "both CareInstructions should remain healthy after the CM data change")
+			By("Expecting the matching Shoot to receive the auth-cm-revision annotation")
+			Eventually(func(g Gomega) {
+				var updatedShoot gardenerv1beta1.Shoot
+				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shoot), &updatedShoot)).To(Succeed())
+				g.Expect(updatedShoot.Annotations).To(HaveKeyWithValue(v1alpha1.AuthCMRevisionAnnotation, updatedRevision),
+					"CareInstruction controller should stamp auth-cm-revision on the Shoot after CM data change")
+			}).Should(Succeed(), "Shoot should receive auth-cm-revision annotation after CM change")
 		})
 
-		It("should not enqueue a CareInstruction for an auth ConfigMap in a different namespace", func() {
-			By("Creating an auth ConfigMap in a different namespace")
+		It("should not annotate Shoots for an auth ConfigMap in a different namespace", func() {
+			By("Creating a Shoot on the Garden cluster with a pre-stamped sentinel revision")
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shared-auth-shoot-ns",
+					Namespace: "default",
+					Labels:    map[string]string{"shared-auth": "true"},
+					Annotations: map[string]string{
+						v1alpha1.AuthCMRevisionAnnotation: "sentinel",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot on garden cluster")
+			defer func() {
+				Expect(client.IgnoreNotFound(test.GardenK8sClient.Delete(test.Ctx, shoot))).To(Succeed())
+			}()
+
+			By("Creating an auth ConfigMap with the same name in a different namespace")
 			otherNS := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: "other-ns"},
 			}
@@ -1394,13 +1417,15 @@ var _ = Describe("CareInstruction Controller", func() {
 			otherCM.Data["config.yaml"] = "other: updated"
 			Expect(test.K8sClient.Patch(test.Ctx, otherCM, client.MergeFrom(base))).To(Succeed())
 
-			By("Confirming the default-namespace CareInstructions are not re-enqueued by the other-ns CM")
-			// Both CIs are in "default"; the mapper only lists CIs in cm.Namespace ("other-ns"),
-			// so neither should be enqueued. We verify they remain stable (no unexpected restarts).
+			By("Confirming the Shoot's auth-cm-revision annotation stays at the sentinel value")
+			// The mapper lists CIs in cm.Namespace ("other-ns") only; neither CI is there, so
+			// annotateMatchingShootsForReconcile is never called and the sentinel must stay unchanged.
 			Consistently(func(g Gomega) {
-				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction1), careInstruction1)).To(Succeed())
-				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction2), careInstruction2)).To(Succeed())
-			}, "3s", "500ms").Should(Succeed(), "CareInstructions in default namespace should not be affected by a CM in another namespace")
+				var updatedShoot gardenerv1beta1.Shoot
+				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shoot), &updatedShoot)).To(Succeed())
+				g.Expect(updatedShoot.Annotations).To(HaveKeyWithValue(v1alpha1.AuthCMRevisionAnnotation, "sentinel"),
+					"Shoot annotation must not be changed by a CM event from another namespace")
+			}, "3s", "500ms").Should(Succeed(), "Shoot annotation should not be updated by a CM in another namespace")
 		})
 	})
 

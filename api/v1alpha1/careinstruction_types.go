@@ -42,6 +42,9 @@ const (
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
 	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/auth-configmap"
 
+	// AuthCMRevisionAnnotation is set on Shoots to trigger re-reconciliation when the Greenhouse auth ConfigMap changes.
+	AuthCMRevisionAnnotation = "shoot-grafter.cloudoperators.dev/auth-cm-revision"
+
 	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
 	ShootStatusOnboarded = "Onboarded"
 
