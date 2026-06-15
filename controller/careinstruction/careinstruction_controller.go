@@ -6,6 +6,7 @@ package careinstruction
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"sync"
 
@@ -52,6 +53,7 @@ type garden struct {
 	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
 	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
 	stopChan            chan bool                     // Channel to know if the manager is stopped
+	authConfigMapData   map[string]string             // Last seen auth ConfigMap data, used to detect changes
 }
 
 type careInstructionContextKey struct{}
@@ -181,6 +183,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			gardenClient:        nil,
 			careInstructionSpec: &careInstruction.Spec,
 			cancelFunc:          nil,
+			authConfigMapData:   nil,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -206,6 +209,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		),
 	)
 
+	// Fetch auth ConfigMap data once; set condition and capture data for change detection below.
+	currentAuthCMData := r.fetchAuthConfigMapData(ctx, &careInstruction)
+
 	// Now we check the following to see if we need to recreate and restart the manager (with read lock):
 	r.gardensMu.RLock()
 	garden := r.gardens[gardenKey]
@@ -217,7 +223,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
 	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
-	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
+	// 5. If the auth ConfigMap data has changed, we need to restart the manager so Shoots are re-reconciled
+	authConfigMapDataChanged := !maps.Equal(garden.authConfigMapData, currentAuthCMData)
+	// 6. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
 	channelExists := garden.stopChan != nil
 	channelOpen := true
 	if channelExists {
@@ -232,8 +240,8 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 	r.gardensMu.RUnlock()
 
-	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen {
-		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
+	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && !authConfigMapDataChanged && channelExists && channelOpen {
+		r.Info("Manager is running, config unchanged, skipping recreation", "careInstruction", careInstruction.Name)
 		return nil
 	}
 	var reason string
@@ -244,6 +252,8 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		reason = "garden cluster config has changed"
 	case careInstructionSpecChanged:
 		reason = "careInstruction.Spec has changed"
+	case authConfigMapDataChanged:
+		reason = "auth ConfigMap data has changed"
 	case !shootControllerStarted:
 		reason = "shoot controller not started"
 	case !channelExists:
@@ -322,6 +332,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	r.gardens[gardenKey].cancelFunc = cancel
 	r.gardens[gardenKey].stopChan = make(chan bool)
 	r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
+	r.gardens[gardenKey].authConfigMapData = currentAuthCMData
 	stopChan := r.gardens[gardenKey].stopChan
 	r.gardensMu.Unlock()
 
@@ -619,4 +630,23 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(_ con
 			},
 		},
 	}
+}
+
+// fetchAuthConfigMapData fetches the auth ConfigMap referenced by the CareInstruction, sets the AuthCMFound
+// condition, and returns the ConfigMap's Data. Returns nil when no auth ConfigMap is configured.
+func (r *CareInstructionReconciler) fetchAuthConfigMapData(ctx context.Context, careInstruction *v1alpha1.CareInstruction) map[string]string {
+	if careInstruction.Spec.AuthenticationConfigMapName == "" {
+		return nil
+	}
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: careInstruction.Namespace,
+		Name:      careInstruction.Spec.AuthenticationConfigMapName,
+	}, &cm); err != nil {
+		r.Info("auth ConfigMap unavailable", "error", err)
+		careInstruction.Status.SetConditions(greenhousemetav1alpha1.FalseCondition(v1alpha1.AuthCMFoundCondition, "AuthCMNotFound", err.Error()))
+		return nil
+	}
+	careInstruction.Status.SetConditions(greenhousemetav1alpha1.TrueCondition(v1alpha1.AuthCMFoundCondition, "AuthCMFound", ""))
+	return cm.Data
 }
