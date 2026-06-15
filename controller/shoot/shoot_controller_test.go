@@ -1743,11 +1743,8 @@ jwt:
 				// Verify AuthConfigMapLabel was added to enable the watch predicate
 				g.Expect(updatedConfigMap.Labels).To(HaveKeyWithValue(v1alpha1.AuthConfigMapLabel, "true"),
 					"controller should add auth-configmap label so the watch predicate can match")
-				// Verify CareInstructionLabel was added to associate the CM with its owning CareInstruction
-				g.Expect(updatedConfigMap.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, careInstruction.Name),
-					"controller should add careinstruction label to identify the owning CareInstruction")
 				return true
-			}).Should(BeTrue(), "controller should add both auth and careinstruction labels when not initially present")
+			}).Should(BeTrue(), "controller should add the auth-configmap label when not initially present")
 		})
 	})
 

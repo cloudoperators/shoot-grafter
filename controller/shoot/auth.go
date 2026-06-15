@@ -46,22 +46,9 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		}
 		labelsNeedUpdate := false
 
-		// If the CM is already owned by a different CareInstruction, skip relabelling.
-		existingOwner, hasCILabel := greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel]
-		if hasCILabel && existingOwner != r.CareInstruction.Name {
-			r.Info("auth ConfigMap is already owned by another CareInstruction; skipping relabel",
-				"configMap", greenhouseAuthConfigMap.Name,
-				"existingOwner", existingOwner,
-				"thisCareInstruction", r.CareInstruction.Name)
-		} else {
-			if _, hasAuthLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasAuthLabel {
-				greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
-				labelsNeedUpdate = true
-			}
-			if !hasCILabel {
-				greenhouseAuthConfigMap.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
-				labelsNeedUpdate = true
-			}
+		if _, hasAuthLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasAuthLabel {
+			greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+			labelsNeedUpdate = true
 		}
 
 		if labelsNeedUpdate {

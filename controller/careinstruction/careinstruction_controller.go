@@ -608,28 +608,30 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForCreatedClusters(_ c
 	}
 }
 
-// enqueueCareInstructionForAuthConfigMap enqueues the CareInstruction that references the changed auth ConfigMap.
-// The CareInstructionLabel on the ConfigMap identifies the owning CareInstruction.
-func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(_ context.Context, obj client.Object) []ctrl.Request {
+// enqueueCareInstructionForAuthConfigMap enqueues all CareInstructions in the same namespace that reference
+// the changed auth ConfigMap via spec.authenticationConfigMapName.
+func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(ctx context.Context, obj client.Object) []ctrl.Request {
 	cm, ok := obj.(*corev1.ConfigMap)
 	if !ok {
 		return nil
 	}
 
-	careInstructionName, exists := cm.Labels[v1alpha1.CareInstructionLabel]
-	if !exists {
+	var ciList v1alpha1.CareInstructionList
+	if err := r.List(ctx, &ciList, client.InNamespace(cm.Namespace)); err != nil {
+		r.Error(err, "failed to list CareInstructions for auth ConfigMap change", "configMap", cm.Name, "namespace", cm.Namespace)
 		return nil
 	}
 
-	r.Info("Enqueuing CareInstruction for auth ConfigMap change", "configMap", cm.Name, "careInstruction", careInstructionName)
-	return []ctrl.Request{
-		{
-			NamespacedName: client.ObjectKey{
-				Name:      careInstructionName,
-				Namespace: cm.Namespace,
-			},
-		},
+	var requests []ctrl.Request
+	for _, ci := range ciList.Items {
+		if ci.Spec.AuthenticationConfigMapName == cm.Name {
+			requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKey{Name: ci.Name, Namespace: ci.Namespace}})
+		}
 	}
+	if len(requests) > 0 {
+		r.Info("Enqueuing CareInstructions for auth ConfigMap change", "configMap", cm.Name, "namespace", cm.Namespace, "count", len(requests))
+	}
+	return requests
 }
 
 // fetchAuthConfigMapData fetches the auth ConfigMap referenced by the CareInstruction, sets the AuthCMFound
