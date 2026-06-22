@@ -240,7 +240,8 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	r.gardensMu.RUnlock()
 
 	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen {
-		r.Info("Manager is running, config unchanged, skipping recreation", "careInstruction", careInstruction.Name)
+		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
+
 		// On auth CM data change, annotate matching Shoots so the ShootController re-reconciles them.
 		// Skip on first reconcile (prevRevision == "") — the initial cache sync already queues every Shoot.
 		if authConfigMapRevisionChanged && currentAuthCMRevision != "" {
@@ -323,8 +324,8 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		return err
 	}
 
-	// Register the ShootController with the garden manager.
-	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster.
+	// Register the ShootController with the garden manager
+	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster
 	sc := &shoot.ShootController{
 		GreenhouseClient: r.Client,
 		GardenClient:     gardenClient,
