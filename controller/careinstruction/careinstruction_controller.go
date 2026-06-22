@@ -241,135 +241,135 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen {
 		r.Info("Manager is running, config unchanged, skipping recreation", "careInstruction", careInstruction.Name)
-	} else {
-		var reason string
-		switch {
-		case !mgrExists:
-			reason = "no manager exists"
-		case gardenConfigChanged:
-			reason = "garden cluster config has changed"
-		case careInstructionSpecChanged:
-			reason = "careInstruction.Spec has changed"
-		case !shootControllerStarted:
-			reason = "shoot controller not started"
-		case !channelExists:
-			reason = "stop channel is missing"
-		case !channelOpen:
-			reason = "manager stop channel is closed"
-		default:
-			reason = "unknown reason"
-		}
-		r.Info("Recreating client and manager for garden cluster because "+reason, "careInstruction", careInstruction.Name)
-
-		// Stop the existing manager if it exists (with read lock for cancelFunc access)
-		if mgrExists {
+		// On auth CM data change, annotate matching Shoots so the ShootController re-reconciles them.
+		// Skip on first reconcile (prevRevision == "") — the initial cache sync already queues every Shoot.
+		if authConfigMapRevisionChanged && currentAuthCMRevision != "" {
 			r.gardensMu.RLock()
-			cancelFunc := r.gardens[gardenKey].cancelFunc
+			prevRevision := r.gardens[gardenKey].authConfigMapRevision
+			gardenClientPtr := r.gardens[gardenKey].gardenClient
 			r.gardensMu.RUnlock()
 
-			if cancelFunc != nil {
-				cancelFunc()
+			if prevRevision != "" {
+				if err := r.annotateMatchingShootsForReconcile(ctx, &careInstruction, *gardenClientPtr, currentAuthCMRevision); err != nil {
+					// Keep old revision so next reconcile retries.
+					r.Error(err, "failed to annotate shoots after auth CM change", "careInstruction", careInstruction.Name)
+					return nil
+				}
 			}
-			r.Info("Stopped existing garden manager for shootController", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
+			r.gardensMu.Lock()
+			r.gardens[gardenKey].authConfigMapRevision = currentAuthCMRevision
+			r.gardensMu.Unlock()
 		}
+		return nil
+	}
 
-		// Create a new client for the garden cluster
-		gardenClient, err := client.New(&gardenClientConfig, client.Options{Scheme: scheme})
-		if err != nil {
-			return err
-		}
-		r.Info("Successfully created client for garden cluster", "name", careInstruction.Spec.GardenClusterName)
+	var reason string
+	switch {
+	case !mgrExists:
+		reason = "no manager exists"
+	case gardenConfigChanged:
+		reason = "garden cluster config has changed"
+	case careInstructionSpecChanged:
+		reason = "careInstruction.Spec has changed"
+	case !shootControllerStarted:
+		reason = "shoot controller not started"
+	case !channelExists:
+		reason = "stop channel is missing"
+	case !channelOpen:
+		reason = "manager stop channel is closed"
+	default:
+		reason = "unknown reason"
+	}
+	r.Info("Recreating client and manager for garden cluster because "+reason, "careInstruction", careInstruction.Name)
 
-		skipNameValidation := true
-		shootControllerMgr, err := ctrl.NewManager(&gardenClientConfig, ctrl.Options{
-			Scheme: scheme,
-			Cache: cache.Options{
-				// Only watch the namespace specified in the CareInstruction
-				DefaultNamespaces: map[string]cache.Config{
-					careInstruction.Spec.GardenNamespace: {},
-				},
-			},
-			Metrics: server.Options{
-				BindAddress: "0", // Disable metrics for the shoot controller manager
-			},
-			BaseContext: r.GardenMgrContextFunc, // Use the context factory function to get a long-running context
-			Controller: config.Controller{
-				SkipNameValidation: &skipNameValidation, // Skip name validation for the controller
-			},
-		})
-
-		if err != nil {
-			return err
-		}
-
-		// Register the ShootController with the garden manager.
-		// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster.
-		sc := &shoot.ShootController{
-			GreenhouseClient: r.Client,
-			GardenClient:     gardenClient,
-			Logger:           r.WithValues("careInstruction", careInstruction.Name),
-			Name:             shoot.GenerateName(careInstruction.Name),
-			CareInstruction:  careInstruction.DeepCopy(),
-			EventRecorder:    r.GetEventRecorder(shoot.GenerateName(careInstruction.Name)),
-		}
-		if err := sc.SetupWithManager(shootControllerMgr); err != nil {
-			return err
-		}
-		r.Info("Successfully created shoot controller manager for garden cluster with shoot controller", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
-
-		// Create a new context for the garden manager from the main context with cancel function
-		gardenMgrContext, cancel := context.WithCancel(r.GardenMgrContextFunc())
-
-		// Update garden state (with write lock)
-		r.gardensMu.Lock()
-		r.gardens[gardenKey].gardenConfig = &gardenClientConfig
-		r.gardens[gardenKey].gardenClient = &gardenClient
-		r.gardens[gardenKey].mgr = shootControllerMgr
-		r.gardens[gardenKey].cancelFunc = cancel
-		r.gardens[gardenKey].stopChan = make(chan bool)
-		r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
-		stopChan := r.gardens[gardenKey].stopChan
-		r.gardensMu.Unlock()
-
-		// Start the garden manager in a goroutine
-		go func() {
-			defer close(stopChan)
-			log.FromContext(gardenMgrContext).Info("Starting garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
-			if err := shootControllerMgr.Start(gardenMgrContext); err != nil {
-				log.FromContext(gardenMgrContext).Error(err, "Failed to start garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
-				return
-			}
-			log.FromContext(gardenMgrContext).Info("Shut down garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
-		}()
-
-		careInstruction.Status.SetConditions(
-			greenhousemetav1alpha1.TrueCondition(
-				v1alpha1.ShootControllerStartedCondition,
-				"Started",
-				"",
-			),
-		)
-	} // end manager-restart else block
-
-	// On auth CM data change, annotate matching Shoots so the ShootController re-reconciles them.
-	// Skip on first reconcile (prevRevision == "") — the initial cache sync already queues every Shoot.
-	if authConfigMapRevisionChanged && currentAuthCMRevision != "" {
+	// Stop the existing manager if it exists (with read lock for cancelFunc access)
+	if mgrExists {
 		r.gardensMu.RLock()
-		prevRevision := r.gardens[gardenKey].authConfigMapRevision
-		gardenClientPtr := r.gardens[gardenKey].gardenClient
+		cancelFunc := r.gardens[gardenKey].cancelFunc
 		r.gardensMu.RUnlock()
 
-		if prevRevision != "" {
-			if err := r.annotateMatchingShootsForReconcile(ctx, &careInstruction, *gardenClientPtr, currentAuthCMRevision); err != nil {
-				// Keep old revision so next reconcile retries.
-				r.Error(err, "failed to annotate shoots after auth CM change", "careInstruction", careInstruction.Name)
-				return nil
-			}
+		if cancelFunc != nil {
+			cancelFunc()
 		}
-		r.gardensMu.Lock()
-		r.gardens[gardenKey].authConfigMapRevision = currentAuthCMRevision
-		r.gardensMu.Unlock()
+		r.Info("Stopped existing garden manager for shootController", "shootControllerName", shoot.GenerateName(careInstruction.Name), "careInstruction", careInstruction.Name)
 	}
+
+	// Create a new client for the garden cluster
+	gardenClient, err := client.New(&gardenClientConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return err
+	}
+	r.Info("Successfully created client for garden cluster", "name", careInstruction.Spec.GardenClusterName)
+
+	skipNameValidation := true
+	shootControllerMgr, err := ctrl.NewManager(&gardenClientConfig, ctrl.Options{
+		Scheme: scheme,
+		Cache: cache.Options{
+			// Only watch the namespace specified in the CareInstruction
+			DefaultNamespaces: map[string]cache.Config{
+				careInstruction.Spec.GardenNamespace: {},
+			},
+		},
+		Metrics: server.Options{
+			BindAddress: "0", // Disable metrics for the shoot controller manager
+		},
+		BaseContext: r.GardenMgrContextFunc, // Use the context factory function to get a long-running context
+		Controller: config.Controller{
+			SkipNameValidation: &skipNameValidation, // Skip name validation for the controller
+		},
+	})
+
+	if err != nil {
+		return err
+	}
+
+	// Register the ShootController with the garden manager.
+	// Note: EventRecorder is obtained from the Greenhouse manager to emit events on the Greenhouse cluster.
+	sc := &shoot.ShootController{
+		GreenhouseClient: r.Client,
+		GardenClient:     gardenClient,
+		Logger:           r.WithValues("careInstruction", careInstruction.Name),
+		Name:             shoot.GenerateName(careInstruction.Name),
+		CareInstruction:  careInstruction.DeepCopy(),
+		EventRecorder:    r.GetEventRecorder(shoot.GenerateName(careInstruction.Name)),
+	}
+	if err := sc.SetupWithManager(shootControllerMgr); err != nil {
+		return err
+	}
+	r.Info("Successfully created shoot controller manager for garden cluster with shoot controller", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
+
+	// Create a new context for the garden manager from the main context with cancel function
+	gardenMgrContext, cancel := context.WithCancel(r.GardenMgrContextFunc())
+
+	// Update garden state (with write lock)
+	r.gardensMu.Lock()
+	r.gardens[gardenKey].gardenConfig = &gardenClientConfig
+	r.gardens[gardenKey].gardenClient = &gardenClient
+	r.gardens[gardenKey].mgr = shootControllerMgr
+	r.gardens[gardenKey].cancelFunc = cancel
+	r.gardens[gardenKey].stopChan = make(chan bool)
+	r.gardens[gardenKey].careInstructionSpec = &careInstruction.Spec
+	stopChan := r.gardens[gardenKey].stopChan
+	r.gardensMu.Unlock()
+
+	// Start the garden manager in a goroutine
+	go func() {
+		defer close(stopChan)
+		log.FromContext(gardenMgrContext).Info("Starting garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
+		if err := shootControllerMgr.Start(gardenMgrContext); err != nil {
+			log.FromContext(gardenMgrContext).Error(err, "Failed to start garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
+			return
+		}
+		log.FromContext(gardenMgrContext).Info("Shut down garden manager", "shootControllerName", sc.Name, "careInstruction", careInstruction.Name)
+	}()
+
+	careInstruction.Status.SetConditions(
+		greenhousemetav1alpha1.TrueCondition(
+			v1alpha1.ShootControllerStartedCondition,
+			"Started",
+			"",
+		),
+	)
 
 	return nil
 }
