@@ -86,6 +86,11 @@ type CareInstructionSpec struct {
 	// AdditionalLabels are labels that will be added to every Greenhouse Cluster created by this CareInstruction.
 	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`
 
+	// AdditionalAnnotations are annotations to be added to the Greenhouse cluster Secret
+	// created for each matched Shoot.
+	// +optional
+	AdditionalAnnotations map[string]string `json:"additionalAnnotations,omitempty"`
+
 	// EnableRBAC indicates whether the automatic configuration of RBAC roles and role bindings for the Greenhouse service account on the shoot cluster should is enabled. Defaulted to true.
 	// +kubebuilder:default=true
 	EnableRBAC bool `json:"enableRBAC,omitempty"`

@@ -1,7 +1,3 @@
-# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
-#
-# SPDX-License-Identifier: Apache-2.0
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -55,6 +51,13 @@ spec:
             description: CareInstructionSpec holds the configuration for how to onboard
               Gardener shoots to Greenhouse.
             properties:
+              additionalAnnotations:
+                additionalProperties:
+                  type: string
+                description: |-
+                  AdditionalAnnotations are annotations to be added to the Greenhouse cluster Secret
+                  created for each matched Shoot.
+                type: object
               additionalLabels:
                 additionalProperties:
                   type: string

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 
 	"shoot-grafter/api/v1alpha1"
@@ -32,6 +33,10 @@ import (
 const (
 	// shootCACMSuffix is the suffix used to identify the ConfigMap containing the CA for the shoot api-server.
 	shootCACMSuffix = ".ca-cluster"
+
+	// managedAnnotationKeysAnnotation tracks which annotation keys are managed by additionalAnnotations
+	// so stale keys can be removed when they are removed from the spec.
+	managedAnnotationKeysAnnotation = "shoot-grafter.cloudoperators.dev/managed-annotation-keys"
 )
 
 type ShootController struct {
@@ -171,6 +176,13 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
 	}
 
+	// Get additional annotations to set on the Secret
+	if r.CareInstruction.Spec.AdditionalAnnotations != nil {
+		for k, v := range r.CareInstruction.Spec.AdditionalAnnotations {
+			secretAnnotations[k] = v
+		}
+	}
+
 	// create or update Secret with the CA data from the shoot
 	// and the labels from the CareInstruction
 	var cm corev1.ConfigMap
@@ -213,7 +225,22 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
 		}
+		// Remove stale additional annotations (keys managed before but removed from spec now)
+		if tracked, ok := secret.Annotations[managedAnnotationKeysAnnotation]; ok && tracked != "" {
+			for _, key := range strings.Split(tracked, ",") {
+				if _, stillManaged := secretAnnotations[key]; !stillManaged {
+					delete(secret.Annotations, key)
+				}
+			}
+		}
 		maps.Copy(secret.Annotations, secretAnnotations)
+		// Update tracking annotation with the current set of additionalAnnotations keys
+		managedKeys := make([]string, 0, len(r.CareInstruction.Spec.AdditionalAnnotations))
+		for k := range r.CareInstruction.Spec.AdditionalAnnotations {
+			managedKeys = append(managedKeys, k)
+		}
+		sort.Strings(managedKeys)
+		secret.Annotations[managedAnnotationKeysAnnotation] = strings.Join(managedKeys, ",")
 		// Merge labels - preserve existing ones and add/update ours
 		if secret.Labels == nil {
 			secret.Labels = make(map[string]string)
