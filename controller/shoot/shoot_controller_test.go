@@ -313,8 +313,8 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-1.example.com",
 							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
@@ -394,8 +394,8 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-1.example.com",
 							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
@@ -414,8 +414,8 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-2.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-2.example.com",
 							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
@@ -494,8 +494,8 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-1.example.com",
 							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
@@ -776,8 +776,8 @@ var _ = Describe("Shoot Controller", func() {
 					"quux": "corge",
 				}), "should have the expected labels")
 				g.Expect(secret.Annotations).To(Equal(map[string]string{
-					"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-					greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot.example.com",
+					"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+					greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot.example.com",
 					"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 				}), "should have the expected annotations")
 				g.Expect(secret.Data).To(HaveKeyWithValue("ca.crt", []byte(base64.StdEncoding.EncodeToString([]byte("test-ca-data")))), "should have the expected data")
@@ -953,8 +953,8 @@ var _ = Describe("Shoot Controller", func() {
 						"greenhouse.sap/propagate-labels":                          "shoot-grafter.cloudoperators.dev/careinstruction",
 						greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-ext-ann.example.com",
 						"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "my-annotation,old-annotation",
-						"my-annotation":          "my-value",
-						"old-annotation":         "old-value",
+						"my-annotation":            "my-value",
+						"old-annotation":           "old-value",
 						"external-only-annotation": "external-only-value",
 					},
 					Labels: map[string]string{

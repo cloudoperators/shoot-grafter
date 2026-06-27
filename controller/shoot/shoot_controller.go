@@ -178,9 +178,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Get additional annotations to set on the Secret
 	if r.CareInstruction.Spec.AdditionalAnnotations != nil {
-		for k, v := range r.CareInstruction.Spec.AdditionalAnnotations {
-			secretAnnotations[k] = v
-		}
+		maps.Copy(secretAnnotations, r.CareInstruction.Spec.AdditionalAnnotations)
 	}
 
 	// create or update Secret with the CA data from the shoot
@@ -227,7 +225,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		// Remove stale additional annotations (keys managed before but removed from spec now)
 		if tracked, ok := secret.Annotations[managedAnnotationKeysAnnotation]; ok && tracked != "" {
-			for _, key := range strings.Split(tracked, ",") {
+			for key := range strings.SplitSeq(tracked, ",") {
 				if _, stillManaged := secretAnnotations[key]; !stillManaged {
 					delete(secret.Annotations, key)
 				}
