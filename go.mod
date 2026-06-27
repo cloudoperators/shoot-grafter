@@ -1,8 +1,6 @@
 module shoot-grafter
 
-go 1.26.0
-
-toolchain go1.26.4
+go 1.26.4
 
 // Synced from greenhouse v0.11.1 go.mod
 replace (
