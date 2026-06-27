@@ -171,15 +171,12 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	secretLabels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
 	labelKeysToPropagate = append(labelKeysToPropagate, v1alpha1.CareInstructionLabel)
 
-	secretAnnotations := map[string]string{
-		"greenhouse.sap/propagate-labels":           strings.Join(labelKeysToPropagate, ","),
-		greenhouseapis.SecretAPIServerURLAnnotation: apiServerURL,
-	}
-
-	// Get additional annotations to set on the Secret
-	if r.CareInstruction.Spec.AdditionalAnnotations != nil {
-		maps.Copy(secretAnnotations, r.CareInstruction.Spec.AdditionalAnnotations)
-	}
+	// Build secret annotations: start with any user-supplied additionalAnnotations,
+	// then overwrite with controller-reserved keys so they always take precedence.
+	secretAnnotations := make(map[string]string, len(r.CareInstruction.Spec.AdditionalAnnotations)+2)
+	maps.Copy(secretAnnotations, r.CareInstruction.Spec.AdditionalAnnotations)
+	secretAnnotations["greenhouse.sap/propagate-labels"] = strings.Join(labelKeysToPropagate, ",")
+	secretAnnotations[greenhouseapis.SecretAPIServerURLAnnotation] = apiServerURL
 
 	// create or update Secret with the CA data from the shoot
 	// and the labels from the CareInstruction

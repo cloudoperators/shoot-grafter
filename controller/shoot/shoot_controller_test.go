@@ -6,6 +6,7 @@ package shoot_test
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
@@ -854,7 +855,7 @@ var _ = Describe("Shoot Controller", func() {
 				// Check that the annotation key is NOT in propagate-labels
 				propagateLabels, ok := secret.Annotations["greenhouse.sap/propagate-labels"]
 				g.Expect(ok).To(BeTrue(), "should have propagate-labels annotation")
-				g.Expect(propagateLabels).NotTo(ContainSubstring("my-annotation"), "additional annotation key should not be in propagate-labels")
+				g.Expect(strings.Split(propagateLabels, ",")).NotTo(ContainElement("my-annotation"), "additional annotation key should not be in propagate-labels")
 
 				// Check that the managed-annotation-keys tracking annotation is set
 				g.Expect(secret.Annotations).To(HaveKeyWithValue(
