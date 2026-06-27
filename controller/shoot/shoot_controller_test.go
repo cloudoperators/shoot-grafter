@@ -887,7 +887,7 @@ var _ = Describe("Shoot Controller", func() {
 						v1alpha1.CareInstructionLabel: careInstruction.Name,
 					},
 				},
-				Type: "greenhouse.sap/oidc-config",
+				Type: greenhouseapis.SecretTypeOIDCConfig,
 			}
 			Expect(test.K8sClient.Create(test.Ctx, staleSecret)).To(Succeed(), "should pre-create Secret with stale annotation")
 
@@ -962,7 +962,7 @@ var _ = Describe("Shoot Controller", func() {
 						v1alpha1.CareInstructionLabel: careInstruction.Name,
 					},
 				},
-				Type: "greenhouse.sap/oidc-config",
+				Type: greenhouseapis.SecretTypeOIDCConfig,
 			}
 			Expect(test.K8sClient.Create(test.Ctx, staleSecret)).To(Succeed(), "should pre-create Secret with stale and external annotations")
 
