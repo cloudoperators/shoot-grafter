@@ -46,12 +46,12 @@ type CareInstructionReconciler struct {
 }
 
 type garden struct {
-	mgr                   ctrl.Manager                  // The manager for the garden cluster
-	gardenConfig          *rest.Config                  // The REST config for the garden cluster
-	gardenClient          *client.Client                // The client for the garden cluster
+	mgr                 ctrl.Manager                  // The manager for the garden cluster
+	gardenConfig        *rest.Config                  // The REST config for the garden cluster
+	gardenClient        *client.Client                // The client for the garden cluster
 	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
 	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
-	stopChan            chan bool                      // Channel to know if the manager is stopped
+	stopChan            chan bool                     // Channel to know if the manager is stopped
 }
 
 type careInstructionContextKey struct{}
@@ -174,9 +174,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 	if _, exists := r.gardens[gardenKey]; !exists {
 		r.gardens[gardenKey] = &garden{
-			mgr:                   nil,
-			gardenConfig:          nil,
-			gardenClient:          nil,
+			mgr:                 nil,
+			gardenConfig:        nil,
+			gardenClient:        nil,
 			careInstructionSpec: &careInstruction.Spec,
 			cancelFunc:          nil,
 			stopChan:            nil,
