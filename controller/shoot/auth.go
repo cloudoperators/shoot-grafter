@@ -34,7 +34,8 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		Namespace: r.CareInstruction.Namespace,
 		Name:      r.CareInstruction.Spec.AuthenticationConfigMapName,
 	}, &greenhouseAuthConfigMap); err != nil {
-		return fmt.Errorf("failed to fetch auth ConfigMap %s: %w", r.CareInstruction.Spec.AuthenticationConfigMapName, err)
+		return fmt.Errorf("failed to fetch AuthenticationConfiguration ConfigMap %s from Greenhouse cluster: %w",
+			r.CareInstruction.Spec.AuthenticationConfigMapName, err)
 	}
 
 	base := greenhouseAuthConfigMap.DeepCopy()
@@ -55,9 +56,11 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 	}
 
 	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data[authConfigMapKey] == "" {
-		return fmt.Errorf("auth ConfigMap %s has no %s key", r.CareInstruction.Spec.AuthenticationConfigMapName, authConfigMapKey)
+		return fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain %s key",
+			r.CareInstruction.Spec.AuthenticationConfigMapName, authConfigMapKey)
 	}
 
+	// Parse the Greenhouse authentication configuration
 	var greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration
 	if err := yaml.Unmarshal([]byte(greenhouseAuthConfigMap.Data[authConfigMapKey]), &greenhouseAuthConfig); err != nil {
 		return fmt.Errorf("failed to parse Greenhouse AuthenticationConfiguration: %w", err)
