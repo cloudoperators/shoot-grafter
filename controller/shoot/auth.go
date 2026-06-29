@@ -11,7 +11,6 @@ import (
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apiserverv1beta1 "k8s.io/apiserver/pkg/apis/apiserver/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,33 +34,28 @@ func (r *ShootController) configureOIDCAuthentication(ctx context.Context, shoot
 		Namespace: r.CareInstruction.Namespace,
 		Name:      r.CareInstruction.Spec.AuthenticationConfigMapName,
 	}, &greenhouseAuthConfigMap); err != nil {
-		if !errors.IsNotFound(err) {
-			r.Info("failed to fetch auth ConfigMap for labeling; skipping label patch",
-				"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName, "error", err)
-		}
-	} else {
-		base := greenhouseAuthConfigMap.DeepCopy()
-		if greenhouseAuthConfigMap.Labels == nil {
-			greenhouseAuthConfigMap.Labels = make(map[string]string)
-		}
-		labelsNeedUpdate := false
+		return fmt.Errorf("failed to fetch auth ConfigMap %s: %w", r.CareInstruction.Spec.AuthenticationConfigMapName, err)
+	}
 
-		if _, hasAuthLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasAuthLabel {
-			greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
-			labelsNeedUpdate = true
-		}
+	base := greenhouseAuthConfigMap.DeepCopy()
+	if greenhouseAuthConfigMap.Labels == nil {
+		greenhouseAuthConfigMap.Labels = make(map[string]string)
+	}
+	labelsNeedUpdate := false
 
-		if labelsNeedUpdate {
-			if patchErr := r.GreenhouseClient.Patch(ctx, &greenhouseAuthConfigMap, client.MergeFrom(base)); patchErr != nil {
-				r.Info("failed to patch labels on auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", patchErr)
-			}
+	if _, hasAuthLabel := greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel]; !hasAuthLabel {
+		greenhouseAuthConfigMap.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+		labelsNeedUpdate = true
+	}
+
+	if labelsNeedUpdate {
+		if patchErr := r.GreenhouseClient.Patch(ctx, &greenhouseAuthConfigMap, client.MergeFrom(base)); patchErr != nil {
+			r.Info("failed to patch labels on auth ConfigMap", "configMap", greenhouseAuthConfigMap.Name, "error", patchErr)
 		}
 	}
 
 	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data[authConfigMapKey] == "" {
-		r.Info("auth ConfigMap has no data, skipping OIDC configuration",
-			"configMap", r.CareInstruction.Spec.AuthenticationConfigMapName)
-		return nil
+		return fmt.Errorf("auth ConfigMap %s has no %s key", r.CareInstruction.Spec.AuthenticationConfigMapName, authConfigMapKey)
 	}
 
 	var greenhouseAuthConfig apiserverv1beta1.AuthenticationConfiguration
