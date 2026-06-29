@@ -6,7 +6,6 @@ package careinstruction
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"sync"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -51,10 +49,9 @@ type garden struct {
 	mgr                   ctrl.Manager                  // The manager for the garden cluster
 	gardenConfig          *rest.Config                  // The REST config for the garden cluster
 	gardenClient          *client.Client                // The client for the garden cluster
-	careInstructionSpec   *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
-	cancelFunc            context.CancelFunc            // Cancel function to stop the manager
-	stopChan              chan bool                     // Channel to know if the manager is stopped
-	authConfigMapRevision string                        // Last-seen auth ConfigMap resourceVersion; used to detect data changes
+	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
+	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
+	stopChan            chan bool                      // Channel to know if the manager is stopped
 }
 
 type careInstructionContextKey struct{}
@@ -180,9 +177,9 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			mgr:                   nil,
 			gardenConfig:          nil,
 			gardenClient:          nil,
-			careInstructionSpec:   &careInstruction.Spec,
-			cancelFunc:            nil,
-			authConfigMapRevision: "",
+			careInstructionSpec: &careInstruction.Spec,
+			cancelFunc:          nil,
+			stopChan:            nil,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -208,8 +205,8 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		),
 	)
 
-	// Fetch auth ConfigMap revision once; set condition and capture revision for change detection below.
-	currentAuthCMRevision := r.fetchAuthConfigMapRevision(ctx, &careInstruction)
+	// Check auth ConfigMap existence and set the AuthCMFound condition.
+	r.checkAuthConfigMap(ctx, &careInstruction)
 
 	// Now we check the following to see if we need to recreate and restart the manager (with read lock):
 	r.gardensMu.RLock()
@@ -222,9 +219,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
 	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
-	// 5. If the auth ConfigMap data has changed, annotate matching Shoots to trigger re-reconciliation
-	authConfigMapRevisionChanged := garden.authConfigMapRevision != currentAuthCMRevision
-	// 6. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
+	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
 	channelExists := garden.stopChan != nil
 	channelOpen := true
 	if channelExists {
@@ -241,26 +236,6 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	if mgrExists && shootControllerStarted && !gardenConfigChanged && !careInstructionSpecChanged && channelExists && channelOpen {
 		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
-
-		// On auth CM data change, annotate matching Shoots so the ShootController re-reconciles them.
-		// Skip on first reconcile (prevRevision == "") — the initial cache sync already queues every Shoot.
-		if authConfigMapRevisionChanged && currentAuthCMRevision != "" {
-			r.gardensMu.RLock()
-			prevRevision := r.gardens[gardenKey].authConfigMapRevision
-			gardenClientPtr := r.gardens[gardenKey].gardenClient
-			r.gardensMu.RUnlock()
-
-			if prevRevision != "" {
-				if err := r.annotateMatchingShootsForReconcile(ctx, &careInstruction, *gardenClientPtr, currentAuthCMRevision); err != nil {
-					// Keep old revision so next reconcile retries.
-					r.Error(err, "failed to annotate shoots after auth CM change", "careInstruction", careInstruction.Name)
-					return nil
-				}
-			}
-			r.gardensMu.Lock()
-			r.gardens[gardenKey].authConfigMapRevision = currentAuthCMRevision
-			r.gardensMu.Unlock()
-		}
 		return nil
 	}
 
@@ -651,62 +626,11 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(ctx c
 	return requests
 }
 
-// annotateMatchingShootsForReconcile stamps AuthCMRevisionAnnotation on each Shoot matching the CI's
-// label selector, triggering the ShootController to re-run configureOIDCAuthentication.
-func (r *CareInstructionReconciler) annotateMatchingShootsForReconcile(
-	ctx context.Context,
-	careInstruction *v1alpha1.CareInstruction,
-	gardenClient client.Client,
-	revision string,
-) error {
-
-	listOpts := []client.ListOption{
-		client.InNamespace(careInstruction.Spec.GardenNamespace),
-	}
-	if sel := careInstruction.Spec.ShootSelector; sel != nil && sel.LabelSelector != nil {
-		ls, err := metav1.LabelSelectorAsSelector(sel.LabelSelector)
-		if err != nil {
-			return fmt.Errorf("invalid label selector: %w", err)
-		}
-		listOpts = append(listOpts, client.MatchingLabelsSelector{Selector: ls})
-	}
-
-	var shoots gardenerv1beta1.ShootList
-	if err := gardenClient.List(ctx, &shoots, listOpts...); err != nil {
-		return fmt.Errorf("list shoots for auth CM fan-out: %w", err)
-	}
-
-	var errs []error
-	for i := range shoots.Items {
-		s := &shoots.Items[i]
-		if s.Annotations[v1alpha1.AuthCMRevisionAnnotation] == revision {
-			continue // already at this revision, no-op
-		}
-		base := s.DeepCopy()
-		if s.Annotations == nil {
-			s.Annotations = map[string]string{}
-		}
-		s.Annotations[v1alpha1.AuthCMRevisionAnnotation] = revision
-		if err := gardenClient.Patch(ctx, s, client.MergeFrom(base)); err != nil {
-			errs = append(errs, fmt.Errorf("annotate shoot %s: %w", s.Name, err))
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	r.Info("annotated shoots for reconcile due to auth ConfigMap change",
-		"careInstruction", careInstruction.Name,
-		"namespace", careInstruction.Spec.GardenNamespace,
-		"revision", revision,
-		"count", len(shoots.Items))
-	return nil
-}
-
-// fetchAuthConfigMapRevision fetches the auth ConfigMap referenced by the CareInstruction, sets the AuthCMFound
-// condition, and returns the ConfigMap's ResourceVersion. Returns "" when no auth ConfigMap is configured.
-func (r *CareInstructionReconciler) fetchAuthConfigMapRevision(ctx context.Context, careInstruction *v1alpha1.CareInstruction) string {
+// checkAuthConfigMap fetches the auth ConfigMap referenced by the CareInstruction and sets the AuthCMFound condition.
+// Does nothing when no auth ConfigMap is configured.
+func (r *CareInstructionReconciler) checkAuthConfigMap(ctx context.Context, careInstruction *v1alpha1.CareInstruction) {
 	if careInstruction.Spec.AuthenticationConfigMapName == "" {
-		return ""
+		return
 	}
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, client.ObjectKey{
@@ -715,8 +639,7 @@ func (r *CareInstructionReconciler) fetchAuthConfigMapRevision(ctx context.Conte
 	}, &cm); err != nil {
 		r.Info("auth ConfigMap unavailable", "error", err)
 		careInstruction.Status.SetConditions(greenhousemetav1alpha1.FalseCondition(v1alpha1.AuthCMFoundCondition, "AuthCMNotFound", err.Error()))
-		return ""
+		return
 	}
 	careInstruction.Status.SetConditions(greenhousemetav1alpha1.TrueCondition(v1alpha1.AuthCMFoundCondition, "AuthCMFound", ""))
-	return cm.ResourceVersion
 }
