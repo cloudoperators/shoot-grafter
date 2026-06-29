@@ -205,9 +205,6 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		),
 	)
 
-	// Check auth ConfigMap existence and set the AuthCMFound condition.
-	r.checkAuthConfigMap(ctx, &careInstruction)
-
 	// Now we check the following to see if we need to recreate and restart the manager (with read lock):
 	r.gardensMu.RLock()
 	garden := r.gardens[gardenKey]
@@ -624,22 +621,4 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(ctx c
 		r.Info("Enqueuing CareInstructions for auth ConfigMap change", "configMap", cm.Name, "namespace", cm.Namespace, "count", len(requests))
 	}
 	return requests
-}
-
-// checkAuthConfigMap fetches the auth ConfigMap referenced by the CareInstruction and sets the AuthCMFound condition.
-// Does nothing when no auth ConfigMap is configured.
-func (r *CareInstructionReconciler) checkAuthConfigMap(ctx context.Context, careInstruction *v1alpha1.CareInstruction) {
-	if careInstruction.Spec.AuthenticationConfigMapName == "" {
-		return
-	}
-	var cm corev1.ConfigMap
-	if err := r.Get(ctx, client.ObjectKey{
-		Namespace: careInstruction.Namespace,
-		Name:      careInstruction.Spec.AuthenticationConfigMapName,
-	}, &cm); err != nil {
-		r.Info("auth ConfigMap unavailable", "error", err)
-		careInstruction.Status.SetConditions(greenhousemetav1alpha1.FalseCondition(v1alpha1.AuthCMFoundCondition, "AuthCMNotFound", err.Error()))
-		return
-	}
-	careInstruction.Status.SetConditions(greenhousemetav1alpha1.TrueCondition(v1alpha1.AuthCMFoundCondition, "AuthCMFound", ""))
 }

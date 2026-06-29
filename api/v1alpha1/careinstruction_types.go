@@ -29,10 +29,6 @@ const (
 	// ShootsReconciledCondition indicates that the shoots targeted by this CareInstruction have been reconciled.
 	ShootsReconciledCondition greenhousemetav1alpha1.ConditionType = "ShootsReconciled"
 
-	// AuthCMFoundCondition indicates that the auth ConfigMap referenced by this CareInstruction was found and is readable.
-	// Only set when authenticationConfigMapName is configured.
-	AuthCMFoundCondition greenhousemetav1alpha1.ConditionType = "AuthCMFound"
-
 	// CommonCleanupFinalizer is the finalizer used to clean up resources when a CareInstruction is deleted.
 	CommonCleanupFinalizer = "shoot-grafter.cloudoperators.dev/finalizer"
 
