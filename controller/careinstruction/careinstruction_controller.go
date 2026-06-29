@@ -69,7 +69,7 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.CareInstruction{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForGardenCluster), builder.WithPredicates(clientutil.PredicateFilterBySecretTypes(greenhouseapis.SecretTypeKubeConfig, greenhouseapis.SecretTypeOIDCConfig))).
 		Watches(&greenhousev1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForCreatedClusters), builder.WithPredicates(clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel))).
-		// Watch auth ConfigMaps; on data change, re-enqueue referencing CareInstructions to annotate their Shoots.
+		// Watch auth ConfigMaps; on data change, re-enqueue referencing CareInstructions.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForAuthConfigMap),
 			builder.WithPredicates(
 				clientutil.PredicateHasLabel(v1alpha1.AuthConfigMapLabel),
