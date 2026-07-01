@@ -144,8 +144,8 @@ linters:
         - k8s.io/component-base
         - k8s.io/kubectl
         - sigs.k8s.io/controller-runtime
-      toolchain-forbidden: true
-      go-version-pattern: 1\.\d+(\.0)?$
+      toolchain-forbidden: false
+      go-version-pattern: 1\.\d+(\.\d+)?$
     gosec:
       excludes:
         # gosec wants us to set a short ReadHeaderTimeout to avoid Slowloris attacks, but doing so would expose us to Keep-Alive race conditions (see https://iximiuz.com/en/posts/reverse-proxy-http-keep-alive-and-502s/

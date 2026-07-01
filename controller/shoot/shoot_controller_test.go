@@ -6,6 +6,7 @@ package shoot_test
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
@@ -313,8 +314,9 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-1.example.com",
+							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
 					Data: map[string][]byte{
@@ -393,8 +395,9 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-1.example.com",
+							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
 					Data: map[string][]byte{
@@ -412,8 +415,9 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-2.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-2.example.com",
+							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
 					Data: map[string][]byte{
@@ -491,8 +495,9 @@ var _ = Describe("Shoot Controller", func() {
 							"quux": "corge",
 						},
 						Annotations: map[string]string{
-							"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-							greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot-1.example.com",
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-1.example.com",
+							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 						},
 					},
 					Data: map[string][]byte{
@@ -772,12 +777,243 @@ var _ = Describe("Shoot Controller", func() {
 					"quux": "corge",
 				}), "should have the expected labels")
 				g.Expect(secret.Annotations).To(Equal(map[string]string{
-					"greenhouse.sap/propagate-labels":           "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
-					greenhouseapis.SecretAPIServerURLAnnotation: "https://api-server.test-shoot.example.com",
+					"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+					greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot.example.com",
+					"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
 				}), "should have the expected annotations")
 				g.Expect(secret.Data).To(HaveKeyWithValue("ca.crt", []byte(base64.StdEncoding.EncodeToString([]byte("test-ca-data")))), "should have the expected data")
 				return true
 			}).Should(BeTrue(), "should eventually find the expected Secret")
+		})
+	})
+
+	When("a CareInstruction with additionalAnnotations is created", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-annotations",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "test",
+							},
+						},
+					},
+					AdditionalAnnotations: map[string]string{
+						"my-annotation": "my-value",
+					},
+				},
+			}
+		})
+
+		It("should apply additionalAnnotations to the cluster Secret", func() {
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ann",
+					Namespace: "default",
+					Labels: map[string]string{
+						"env": "test",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-ann.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ann.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-ann",
+					Namespace: "default",
+				}, secret)
+				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
+
+				// Check that additionalAnnotations are applied
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("my-annotation", "my-value"), "should have additional annotation")
+
+				// Check that the annotation key is NOT in propagate-labels
+				propagateLabels, ok := secret.Annotations["greenhouse.sap/propagate-labels"]
+				g.Expect(ok).To(BeTrue(), "should have propagate-labels annotation")
+				g.Expect(strings.Split(propagateLabels, ",")).NotTo(ContainElement("my-annotation"), "additional annotation key should not be in propagate-labels")
+
+				// Check that the managed-annotation-keys tracking annotation is set
+				g.Expect(secret.Annotations).To(HaveKeyWithValue(
+					"shoot-grafter.cloudoperators.dev/managed-annotation-keys", "my-annotation"),
+					"should have managed-annotation-keys tracking annotation")
+
+				return true
+			}).Should(BeTrue(), "should eventually have additionalAnnotations on the Secret")
+		})
+
+		It("should remove stale additionalAnnotations from secret on next reconcile", func() {
+			// Pre-create the Secret simulating a previously managed annotation (old-annotation)
+			// that is no longer in the CareInstruction's additionalAnnotations.
+			// The tracking annotation records "old-annotation,my-annotation" as previously managed.
+			// After reconciliation, only "my-annotation" should remain (from additionalAnnotations),
+			// while "old-annotation" (which was tracked but is no longer managed) should be removed.
+			staleSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-stale-ann",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"greenhouse.sap/propagate-labels":                          "shoot-grafter.cloudoperators.dev/careinstruction",
+						greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-stale-ann.example.com",
+						"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "my-annotation,old-annotation",
+						"my-annotation":  "my-value",
+						"old-annotation": "old-value",
+					},
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Type: greenhouseapis.SecretTypeOIDCConfig,
+			}
+			Expect(test.K8sClient.Create(test.Ctx, staleSecret)).To(Succeed(), "should pre-create Secret with stale annotation")
+
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-stale-ann",
+					Namespace: "default",
+					Labels: map[string]string{
+						"env": "test",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-stale-ann.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-stale-ann.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// The controller will reconcile and remove "old-annotation" since it is tracked
+			// but no longer present in the CareInstruction's additionalAnnotations.
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-stale-ann",
+					Namespace: "default",
+				}, secret)
+				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
+
+				g.Expect(secret.Annotations).NotTo(HaveKey("old-annotation"), "stale annotation should be removed")
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("my-annotation", "my-value"), "current additionalAnnotation should remain")
+
+				// System-managed annotations should still be present
+				g.Expect(secret.Annotations).To(HaveKey("greenhouse.sap/propagate-labels"), "propagate-labels should still be present")
+				g.Expect(secret.Annotations).To(HaveKey(greenhouseapis.SecretAPIServerURLAnnotation), "API server URL annotation should still be present")
+
+				return true
+			}).Should(BeTrue(), "should eventually remove stale annotation from Secret")
+		})
+
+		It("should preserve external annotations when additionalAnnotations change", func() {
+			// Pre-create the Secret with a stale tracked annotation AND an external annotation.
+			// After reconciliation, the stale tracked key should be removed but the external one preserved.
+			staleSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ext-ann",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"greenhouse.sap/propagate-labels":                          "shoot-grafter.cloudoperators.dev/careinstruction",
+						greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-ext-ann.example.com",
+						"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "my-annotation,old-annotation",
+						"my-annotation":            "my-value",
+						"old-annotation":           "old-value",
+						"external-only-annotation": "external-only-value",
+					},
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Type: greenhouseapis.SecretTypeOIDCConfig,
+			}
+			Expect(test.K8sClient.Create(test.Ctx, staleSecret)).To(Succeed(), "should pre-create Secret with stale and external annotations")
+
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ext-ann",
+					Namespace: "default",
+					Labels: map[string]string{
+						"env": "test",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-ext-ann.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-ext-ann.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// The controller will reconcile: remove "old-annotation" (tracked but no longer managed),
+			// keep "my-annotation" (still in additionalAnnotations), and preserve "external-only-annotation".
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-ext-ann",
+					Namespace: "default",
+				}, secret)
+				g.Expect(err).NotTo(HaveOccurred(), "should get secret")
+
+				g.Expect(secret.Annotations).NotTo(HaveKey("old-annotation"), "stale tracked annotation should be removed")
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("my-annotation", "my-value"), "current additionalAnnotation should remain")
+				g.Expect(secret.Annotations).To(HaveKeyWithValue("external-only-annotation", "external-only-value"), "external annotation should be preserved")
+				g.Expect(secret.Annotations).To(HaveKey("greenhouse.sap/propagate-labels"), "propagate-labels should still be present")
+
+				return true
+			}).Should(BeTrue(), "should eventually remove stale tracked annotation while preserving external one")
 		})
 	})
 
