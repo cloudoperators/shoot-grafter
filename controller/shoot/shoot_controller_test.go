@@ -1972,7 +1972,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap")
 
-			// Eventually verify both labels were added by the controller
+			// Eventually verify auth label was added by the controller
 			Eventually(func(g Gomega) bool {
 				var updatedConfigMap corev1.ConfigMap
 				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
@@ -2206,7 +2206,7 @@ jwt:
 			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
 		})
 
-		It("should NOT annotate Shoot when setting up OIDC for the first time", func() {
+		It("should NOT add reconcile annotation when setting up OIDC for the first time", func() {
 			// Create a shoot without any OIDC configuration
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
