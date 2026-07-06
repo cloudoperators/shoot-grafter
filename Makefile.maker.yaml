@@ -2,11 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration file for <https://github.com/sapcc/go-makefile-maker>
-#
-# NOTE: After running go-makefile-maker, manually apply these changes:
-# 1. Add 'branches: [main]' to container-registry-ghcr.yaml for main branch builds
-# 2. Change 'make build/cover.out' to 'make test-with-envtest' in ci.yaml for envtest support
-# 3. Change 'rm typos' to 'rm -f typos' in checks.yaml
 
 metadata:
   url: https://github.com/cloudoperators/shoot-grafter
@@ -17,7 +12,7 @@ binaries:
     installTo:   bin/
 
 golang:
-  setGoModVersion: true
+  setGoModVersion: false
   enableVendoring: false
 
 golangciLint:
@@ -66,4 +61,11 @@ typos:
     Ded: Ded # Don't correct ANDed from k8s machinery
 
 verbatim: |
+  VERSION = 0.3.0
+
+  # Wire envtest into the generated build/cover.out target so 'make build/cover.out'
+  # works standalone (as called by the CI workflow) without needing KUBEBUILDER_ASSETS set.
+  GO_TESTENV += KUBEBUILDER_ASSETS=$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)
+  build/cover.out: setup-envtest
+
   include hack/kubebuilder.mk
