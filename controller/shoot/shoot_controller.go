@@ -112,11 +112,16 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Check if a cluster with this name already exists and is owned by a different CareInstruction
 	// Do this early to avoid unnecessary work
-	var existingCluster greenhousev1alpha1.Cluster
+	var (
+		existingCluster greenhousev1alpha1.Cluster
+		ownerLabel      string
+		hasLabel        bool
+	)
+	existingClusterFound := false
 	err := r.GreenhouseClient.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: r.CareInstruction.Namespace}, &existingCluster)
 	if err == nil {
 		// Cluster exists - check ownership
-		if ownerLabel, hasLabel := existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
+		if ownerLabel, hasLabel = existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
 			// TODO: emit event on CareInstruction
 			r.Info("Skipping shoot - cluster already owned by different CareInstruction",
 				"shoot", req.Name,
@@ -124,6 +129,9 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				"attemptedOwner", r.CareInstruction.Name)
 			return ctrl.Result{}, nil
 		}
+		existingClusterFound = true
+	} else if client.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, err
 	}
 
 	var shoot gardenerv1beta1.Shoot
@@ -131,6 +139,11 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Info("unable to fetch Shoot")
 		if client.IgnoreNotFound(err) == nil {
 			// Shoot was deleted
+			if existingClusterFound && hasLabel && ownerLabel == r.CareInstruction.Name {
+				if err := r.RequestClusterDeletion(ctx, existingCluster); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
 			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootDeleted",
 				fmt.Sprintf("Shoot %s/%s was deleted", req.Namespace, req.Name))
 		}
@@ -311,6 +324,15 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	r.Info("Successfully reconciled Shoot", "name", shoot.Name)
 
 	return ctrl.Result{}, nil
+}
+
+func (r *ShootController) RequestClusterDeletion(ctx context.Context, existingCluster greenhousev1alpha1.Cluster) error {
+	if err := r.GreenhouseClient.Delete(ctx, &existingCluster); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ClusterDeleted",
+		fmt.Sprintf("Deletion of Cluster %s/%s was requested", existingCluster.Namespace, existingCluster.Name))
+	return nil
 }
 
 // GenerateName generates a name for the shoot controller based on the garden cluster name.

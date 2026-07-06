@@ -28,7 +28,7 @@ shoot-grafter continuously monitors Garden clusters for Shoots matching specific
 6. **Configures RBAC**: Optionally sets up role-based access control on Shoot clusters for Greenhouse service accounts
 7. **Maintains synchronization**: Keeps Greenhouse Cluster resources in sync with their corresponding Shoots
 
-shoot-grafter currently only creates clusters matching Shoots but does not automatically clean up clusters when Shoot labels change or Shoots are deleted. Manual cleanup of Greenhouse Cluster resources is required in these scenarios.
+shoot-grafter currently does not automatically clean up clusters when Shoot labels change. Manual cleanup of Greenhouse Cluster resources is required in such a scenario.
 
 ## Architecture
 
@@ -147,6 +147,7 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Generates Greenhouse Cluster resources with appropriate labels
 - Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc_connectivity/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
+- Cleans up Greenhouse clusters when the corresponding Gardener Shoot is removed
 
 ## Custom Resource: CareInstruction
 
@@ -435,6 +436,7 @@ shoot-grafter emits the following events during Shoot reconciliation:
 | `ShootReconciled` | Successfully completed reconciliation for a Shoot |
 | `SecretCreated` | Created Greenhouse secret with cluster credentials |
 | `SecretUpdated` | Updated existing Greenhouse secret with new credentials |
+| `ClusterDeleted` | Cluster deletion was requested in the Greenhouse |
 | `ShootDeleted` | Shoot was deleted from the Garden cluster |
 | `OIDCConfigured` | Successfully configured OIDC authentication for the Shoot |
 | `RBACCreated` | Created RBAC ClusterRoleBinding for Greenhouse ServiceAccount on the Shoot |

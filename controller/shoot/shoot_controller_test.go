@@ -15,6 +15,7 @@ import (
 	webhookv1alpha1 "shoot-grafter/webhook/v1alpha1"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
+	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1014,6 +1015,109 @@ var _ = Describe("Shoot Controller", func() {
 
 				return true
 			}).Should(BeTrue(), "should eventually remove stale tracked annotation while preserving external one")
+		})
+	})
+
+	When("a CareInstruction is created", func() {
+		BeforeEach(func() {
+			careInstruction = &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-careinstruction-shoot-removal",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"env": "test",
+							},
+						},
+					},
+				},
+			}
+		})
+
+		It("should handle shoot removal - happy path", func() {
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-sr",
+					Namespace: "default",
+					Labels: map[string]string{
+						"env": "test",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-sr.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			// Create ConfigMap with CA data so reconciliation can proceed.
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-sr.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			// Wait for initial reconciliation (Secret creation).
+			Eventually(func(g Gomega) bool {
+				secret := &corev1.Secret{}
+				return test.K8sClient.Get(test.Ctx, client.ObjectKey{Name: shoot.Name, Namespace: "default"}, secret) == nil
+			}).Should(BeTrue(), "should eventually create secret")
+
+			// Simulate the Greenhouse Cluster existing (it is created by Greenhouse based on the Secret).
+			cluster := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot.Name,
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{
+					AccessMode: greenhousev1alpha1.ClusterAccessModeDirect,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster)).To(Succeed(), "should create Cluster resource")
+
+			Expect(test.GardenK8sClient.Delete(test.Ctx, shoot)).To(Succeed(), "should remove Shoot resource")
+
+			Eventually(func(g Gomega) bool {
+				var existingCluster greenhousev1alpha1.Cluster
+				if err := test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shoot), &existingCluster); err != nil {
+					return client.IgnoreNotFound(err) == nil
+				}
+				return false
+			}).Should(BeTrue(), "should eventually notice removal of Cluster resource")
+
+			Eventually(func(g Gomega) bool {
+				events := &corev1.EventList{}
+				g.Expect(test.K8sClient.List(test.Ctx, events, client.InNamespace("default"))).To(Succeed(), "should list events")
+
+				hasClusterDeletionEvent := false
+
+				for _, event := range events.Items {
+					if event.InvolvedObject.Name == careInstruction.Name &&
+						event.InvolvedObject.Kind == "CareInstruction" {
+						if event.Reason == "ClusterDeleted" && event.Type == corev1.EventTypeNormal {
+							hasClusterDeletionEvent = true
+						}
+					}
+				}
+
+				return hasClusterDeletionEvent
+			}).Should(BeTrue(), "should eventually find ClusterDeleted event")
 		})
 	})
 
