@@ -164,20 +164,26 @@ var _ = Describe("Shoot Controller", func() {
 			return len(configMaps.Items) == 0 // Only the garden cluster ConfigMap should remain
 		}).Should(BeTrue(), "should eventually not find ConfigMap resources")
 
-		// Clean up all ConfigMaps created during tests in the Greenhouse cluster
+		// Clean up auth ConfigMaps created during tests in the Greenhouse cluster
 		greenhouseConfigMaps := &corev1.ConfigMapList{}
-		Expect(test.K8sClient.List(test.Ctx, greenhouseConfigMaps, client.InNamespace("default"))).To(Succeed(), "should list ConfigMaps in Greenhouse cluster")
+		Expect(test.K8sClient.List(test.Ctx, greenhouseConfigMaps,
+			client.InNamespace("default"),
+			client.MatchingLabels{v1alpha1.AuthConfigMapLabel: "true"},
+		)).To(Succeed(), "should list auth ConfigMaps in Greenhouse cluster")
 		for _, configMap := range greenhouseConfigMaps.Items {
 			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete ConfigMap resource")
 		}
 		Eventually(func(g Gomega) bool {
 			greenhouseConfigMaps := &corev1.ConfigMapList{}
-			err := test.K8sClient.List(test.Ctx, greenhouseConfigMaps, client.InNamespace("default"))
+			err := test.K8sClient.List(test.Ctx, greenhouseConfigMaps,
+				client.InNamespace("default"),
+				client.MatchingLabels{v1alpha1.AuthConfigMapLabel: "true"},
+			)
 			if err != nil {
 				return false
 			}
 			return len(greenhouseConfigMaps.Items) == 0
-		}).Should(BeTrue(), "should eventually not find ConfigMap resources in Greenhouse cluster")
+		}).Should(BeTrue(), "should eventually not find auth ConfigMap resources in Greenhouse cluster")
 
 		// Clean up any Events created during the tests
 		events := &corev1.EventList{}
