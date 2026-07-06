@@ -117,6 +117,10 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	if err := r.ensureAuthConfigMapLabeled(ctx, &careInstruction); err != nil {
+		r.Error(err, "failed to ensure auth ConfigMap is labeled")
+	}
+
 	if err := r.reconcileManager(ctx, careInstruction); err != nil {
 		r.Error(err, "failed to reconcile manager for garden cluster")
 		careInstruction.Status.SetConditions(
@@ -536,6 +540,33 @@ func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, 
 	}
 	r.Info("Removed finalizer from CareInstruction", "name", careInstruction.Name)
 	return nil
+}
+
+// ensureAuthConfigMapLabeled patches the auth ConfigMap with AuthConfigMapLabel if it is missing,
+// so the CareInstruction controller's watch picks it up without waiting for a Shoot reconcile.
+func (r *CareInstructionReconciler) ensureAuthConfigMapLabeled(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+	if careInstruction.Spec.AuthenticationConfigMapName == "" {
+		return nil
+	}
+
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: careInstruction.Namespace,
+		Name:      careInstruction.Spec.AuthenticationConfigMapName,
+	}, &cm); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+
+	if _, ok := cm.Labels[v1alpha1.AuthConfigMapLabel]; ok {
+		return nil
+	}
+
+	base := cm.DeepCopy()
+	if cm.Labels == nil {
+		cm.Labels = make(map[string]string)
+	}
+	cm.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+	return r.Patch(ctx, &cm, client.MergeFrom(base))
 }
 
 // enqueueCareInstructionForGardenCluster - enqueues the CareInstruction for the given Garden Cluster.
