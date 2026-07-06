@@ -35,6 +35,7 @@ var (
 	mgrCtx          context.Context
 	mgrCancel       context.CancelFunc
 )
+
 var _ = Describe("Shoot Controller", func() {
 	JustBeforeEach(func() {
 		// register controllers in JustBeforeEach, as they depend on the CareInstruction.
@@ -64,18 +65,18 @@ var _ = Describe("Shoot Controller", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the garden manager")
 
-		// Create a manager for the Greenhouse cluster (where events should be emitted)
+		// Build an event recorder backed by the Greenhouse cluster so events are emitted there.
+		// The garden manager's recorder would emit to the Garden cluster, but tests verify events
+		// on the Greenhouse cluster (test.K8sClient).
 		greenhouseMgr, err := ctrl.NewManager(test.Cfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Metrics: server.Options{
-				BindAddress: "0", // Disable metrics
+				BindAddress: "0",
 			},
 			LeaderElection: false,
 		})
-		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager")
+		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the greenhouse manager for event recording")
 
-		// Create ShootController with EventRecorder from Greenhouse manager
-		Expect(err).NotTo(HaveOccurred(), "there must be no error creating the manager")
 		Expect((&shoot.ShootController{
 			GreenhouseClient: test.K8sClient,
 			GardenClient:     test.GardenK8sClient,
@@ -89,7 +90,12 @@ var _ = Describe("Shoot Controller", func() {
 		Expect(careInstructionWebhook.SetupWebhookWithManager(mgr)).To(Succeed(), "there must be no error setting up the webhook with the manager")
 
 		mgrCtx, mgrCancel = context.WithCancel(test.Ctx)
-		// start the manager
+
+		// start both managers
+		go func() {
+			defer GinkgoRecover()
+			Expect(greenhouseMgr.Start(mgrCtx)).To(Succeed())
+		}()
 		go func() {
 			defer GinkgoRecover()
 			Expect(mgr.Start(mgrCtx)).To(Succeed(), "there must be no error starting the manager")
@@ -158,23 +164,25 @@ var _ = Describe("Shoot Controller", func() {
 			return len(configMaps.Items) == 0 // Only the garden cluster ConfigMap should remain
 		}).Should(BeTrue(), "should eventually not find ConfigMap resources")
 
-		// Clean up auth ConfigMaps in Greenhouse cluster using label selector
-		greenhouseAuthConfigMaps := &corev1.ConfigMapList{}
-		Expect(test.K8sClient.List(test.Ctx, greenhouseAuthConfigMaps, client.MatchingLabels{
-			v1alpha1.AuthConfigMapLabel: "true",
-		})).To(Succeed(), "should list auth ConfigMaps in Greenhouse cluster")
-		for _, configMap := range greenhouseAuthConfigMaps.Items {
-			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete auth ConfigMap resource")
+		// Clean up auth ConfigMaps created during tests in the Greenhouse cluster
+		greenhouseConfigMaps := &corev1.ConfigMapList{}
+		Expect(test.K8sClient.List(test.Ctx, greenhouseConfigMaps,
+			client.InNamespace("default"),
+			client.MatchingLabels{v1alpha1.AuthConfigMapLabel: "true"},
+		)).To(Succeed(), "should list auth ConfigMaps in Greenhouse cluster")
+		for _, configMap := range greenhouseConfigMaps.Items {
+			Expect(client.IgnoreNotFound(test.K8sClient.Delete(test.Ctx, &configMap))).To(Succeed(), "should delete ConfigMap resource")
 		}
 		Eventually(func(g Gomega) bool {
-			greenhouseAuthConfigMaps := &corev1.ConfigMapList{}
-			err := test.K8sClient.List(test.Ctx, greenhouseAuthConfigMaps, client.MatchingLabels{
-				v1alpha1.AuthConfigMapLabel: "true",
-			})
+			greenhouseConfigMaps := &corev1.ConfigMapList{}
+			err := test.K8sClient.List(test.Ctx, greenhouseConfigMaps,
+				client.InNamespace("default"),
+				client.MatchingLabels{v1alpha1.AuthConfigMapLabel: "true"},
+			)
 			if err != nil {
 				return false
 			}
-			return len(greenhouseAuthConfigMaps.Items) == 0
+			return len(greenhouseConfigMaps.Items) == 0
 		}).Should(BeTrue(), "should eventually not find auth ConfigMap resources in Greenhouse cluster")
 
 		// Clean up any Events created during the tests
@@ -192,7 +200,6 @@ var _ = Describe("Shoot Controller", func() {
 			return len(events.Items) == 0
 		}).Should(BeTrue(), "should eventually not find Event resources")
 
-		// stop the manager
 		mgrCancel()
 
 	})
@@ -1965,7 +1972,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap")
 
-			// Eventually verify the label was added by the controller
+			// Eventually verify auth label was added by the controller
 			Eventually(func(g Gomega) bool {
 				var updatedConfigMap corev1.ConfigMap
 				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
@@ -1975,10 +1982,11 @@ jwt:
 				if err != nil {
 					return false
 				}
-				// Verify the label was added
-				g.Expect(updatedConfigMap.Labels).To(HaveKeyWithValue(v1alpha1.AuthConfigMapLabel, "true"))
+				// Verify AuthConfigMapLabel was added to enable the watch predicate
+				g.Expect(updatedConfigMap.Labels).To(HaveKeyWithValue(v1alpha1.AuthConfigMapLabel, "true"),
+					"controller should add auth-configmap label so the watch predicate can match")
 				return true
-			}).Should(BeTrue(), "controller should add auth ConfigMap label when not initially present")
+			}).Should(BeTrue(), "controller should add the auth-configmap label when not initially present")
 		})
 	})
 
@@ -2172,10 +2180,9 @@ jwt:
 					AuthenticationConfigMapName: "greenhouse-oidc-config",
 				},
 			}
-		})
 
-		It("should NOT annotate Shoot when setting up OIDC for the first time", func() {
-			// Create Greenhouse auth ConfigMap
+			// Create Greenhouse auth ConfigMap in BeforeEach so JustBeforeEach can fetch its data
+			// for AuthConfigMapData (which is passed in-memory to the ShootController).
 			greenhouseAuthCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "greenhouse-oidc-config",
@@ -2197,7 +2204,9 @@ jwt:
 				},
 			}
 			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
+		})
 
+		It("should NOT add reconcile annotation when setting up OIDC for the first time", func() {
 			// Create a shoot without any OIDC configuration
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2260,37 +2269,17 @@ jwt:
 		})
 
 		It("should annotate Shoot with gardener.cloud/operation=reconcile when ConfigMap content changes", func() {
-			// Create Greenhouse auth ConfigMap
-			greenhouseAuthCM := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "greenhouse-oidc-config",
-					Namespace: "default",
-				},
-				Data: map[string]string{
-					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
-kind: AuthenticationConfiguration
-jwt:
-- issuer:
-    url: https://greenhouse.example.com
-    audiences:
-    - greenhouse
-  claimMappings:
-    username:
-      claim: sub
-      prefix: 'greenhouse:'
-`,
-				},
-			}
-			Expect(test.K8sClient.Create(test.Ctx, greenhouseAuthCM)).To(Succeed(), "should create Greenhouse auth ConfigMap")
+			// Pre-populate the Garden OIDC ConfigMap with old content. The Greenhouse auth ConfigMap
+			// (created in BeforeEach) has audience "greenhouse". On reconcile the ShootController
+			// fetches the Greenhouse CM directly, detects the content difference, updates the Garden CM,
+			// and adds the reconcile annotation.
 
-			// Create a shoot that ALREADY has the OIDC ConfigMap reference
+			// Create a Shoot that already references the Garden OIDC ConfigMap
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-shoot-oidc-update",
 					Namespace: "default",
-					Labels: map[string]string{
-						"oidc-test": "true",
-					},
+					Labels:    map[string]string{"oidc-test": "true"},
 				},
 				Spec: gardenerv1beta1.ShootSpec{
 					Kubernetes: gardenerv1beta1.Kubernetes{
@@ -2303,35 +2292,23 @@ jwt:
 				},
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
-
 			shoot.Status = gardenerv1beta1.ShootStatus{
 				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
-					{
-						Name: "external",
-						URL:  "https://api-server.test-shoot-oidc-update.example.com",
-					},
+					{Name: "external", URL: "https://api-server.test-shoot-oidc-update.example.com"},
 				},
 			}
 			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
 
 			// Create CA ConfigMap
 			caCM := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-shoot-oidc-update.ca-cluster",
-					Namespace: "default",
-				},
-				Data: map[string]string{
-					"ca.crt": "test-ca-data",
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: "test-shoot-oidc-update.ca-cluster", Namespace: "default"},
+				Data:       map[string]string{"ca.crt": "test-ca-data"},
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, caCM)).To(Succeed(), "should create CA ConfigMap")
 
-			// Create the OIDC ConfigMap in Garden cluster with initial content
+			// Pre-populate the Garden OIDC ConfigMap with old content (old audience).
 			gardenOIDCCM := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-careinstruction-oidc-greenhouse-auth",
-					Namespace: "default",
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: "test-careinstruction-oidc-greenhouse-auth", Namespace: "default"},
 				Data: map[string]string{
 					"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
@@ -2346,79 +2323,19 @@ jwt:
 `,
 				},
 			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, gardenOIDCCM)).To(Succeed(), "should create Garden OIDC ConfigMap")
+			Expect(test.GardenK8sClient.Create(test.Ctx, gardenOIDCCM)).To(Succeed(), "should create Garden OIDC ConfigMap with old content")
 
-			// Wait a moment for initial reconciliation
-			Eventually(func(g Gomega) bool {
-				secret := &corev1.Secret{}
-				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      "test-shoot-oidc-update",
-					Namespace: "default",
-				}, secret)
-				return err == nil
-			}).Should(BeTrue(), "should eventually create secret")
-
-			// Now update the Greenhouse ConfigMap (simulating content change)
-			Eventually(func(g Gomega) error {
-				cm := &corev1.ConfigMap{}
-				err := test.K8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      "greenhouse-oidc-config",
-					Namespace: "default",
-				}, cm)
-				if err != nil {
-					return err
-				}
-				cm.Data["config.yaml"] = `apiVersion: apiserver.config.k8s.io/v1beta1
-kind: AuthenticationConfiguration
-jwt:
-- issuer:
-    url: https://greenhouse.example.com
-    audiences:
-    - new-audience
-  claimMappings:
-    username:
-      claim: sub
-      prefix: 'greenhouse-updated:'
-`
-				return test.K8sClient.Update(test.Ctx, cm)
-			}).Should(Succeed(), "should update Greenhouse auth ConfigMap")
-
-			// Trigger reconciliation by updating shoot label
-			Eventually(func(g Gomega) error {
-				s := &gardenerv1beta1.Shoot{}
-				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      "test-shoot-oidc-update",
-					Namespace: "default",
-				}, s)
-				if err != nil {
-					return err
-				}
-				if s.Labels == nil {
-					s.Labels = make(map[string]string)
-				}
-				s.Labels["trigger-reconcile"] = "true"
-				return test.GardenK8sClient.Update(test.Ctx, s)
-			}).Should(Succeed(), "should update Shoot to trigger reconciliation")
-
-			// Eventually verify the Shoot has the reconcile annotation
-			Eventually(func(g Gomega) bool {
+			// Reconcile fires automatically; wait for the Shoot to be annotated
+			Eventually(func(g Gomega) {
 				updatedShoot := &gardenerv1beta1.Shoot{}
-				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
-					Name:      "test-shoot-oidc-update",
-					Namespace: "default",
-				}, updatedShoot)
-				g.Expect(err).NotTo(HaveOccurred(), "should get updated Shoot")
-
-				// Verify reconcile annotation was added
-				if updatedShoot.Annotations == nil {
-					return false
-				}
-				reconcileOp, hasReconcileAnnotation := updatedShoot.Annotations["gardener.cloud/operation"]
-				g.Expect(hasReconcileAnnotation).To(BeTrue(), "should have reconcile annotation for ConfigMap content change")
-				g.Expect(reconcileOp).To(Equal("reconcile"), "should have correct reconcile annotation value")
-
-				return true
-			}).Should(BeTrue(), "should eventually add reconcile annotation to Shoot")
+				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
+					Name: "test-shoot-oidc-update", Namespace: "default",
+				}, updatedShoot)).To(Succeed())
+				g.Expect(updatedShoot.Annotations).ToNot(BeNil(), "should have annotations")
+				g.Expect(updatedShoot.Annotations["gardener.cloud/operation"]).To(Equal("reconcile"),
+					"should have reconcile annotation because Garden CM content was updated")
+			}).Should(Succeed(), "should eventually add reconcile annotation to Shoot")
 		})
+
 	})
 })

@@ -60,7 +60,7 @@ type careInstructionContextKey struct{}
 // +kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -69,6 +69,13 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.CareInstruction{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForGardenCluster), builder.WithPredicates(clientutil.PredicateFilterBySecretTypes(greenhouseapis.SecretTypeKubeConfig, greenhouseapis.SecretTypeOIDCConfig))).
 		Watches(&greenhousev1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForCreatedClusters), builder.WithPredicates(clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel))).
+		// Watch auth ConfigMaps; on data change, re-enqueue referencing CareInstructions.
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForAuthConfigMap),
+			builder.WithPredicates(
+				clientutil.PredicateHasLabel(v1alpha1.AuthConfigMapLabel),
+				clientutil.PredicateConfigMapDataChanged(),
+			),
+		).
 		Complete(r)
 }
 
@@ -108,6 +115,10 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		err := r.cleanupCareInstruction(ctx, &careInstruction)
 		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureAuthConfigMapLabeled(ctx, &careInstruction); err != nil {
+		r.Error(err, "failed to ensure auth ConfigMap is labeled")
 	}
 
 	if err := r.reconcileManager(ctx, careInstruction); err != nil {
@@ -172,6 +183,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			gardenClient:        nil,
 			careInstructionSpec: &careInstruction.Spec,
 			cancelFunc:          nil,
+			stopChan:            nil,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -227,6 +239,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		r.Info("Manager is running, garden cluster config & careInstruction.Spec is unchanged, skipping client and manager recreation", "careInstruction", careInstruction.Name)
 		return nil
 	}
+
 	var reason string
 	switch {
 	case !mgrExists:
@@ -529,6 +542,33 @@ func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, 
 	return nil
 }
 
+// ensureAuthConfigMapLabeled patches the auth ConfigMap with AuthConfigMapLabel if it is missing,
+// so the CareInstruction controller's watch picks it up without waiting for a Shoot reconcile.
+func (r *CareInstructionReconciler) ensureAuthConfigMapLabeled(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+	if careInstruction.Spec.AuthenticationConfigMapName == "" {
+		return nil
+	}
+
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: careInstruction.Namespace,
+		Name:      careInstruction.Spec.AuthenticationConfigMapName,
+	}, &cm); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+
+	if _, ok := cm.Labels[v1alpha1.AuthConfigMapLabel]; ok {
+		return nil
+	}
+
+	base := cm.DeepCopy()
+	if cm.Labels == nil {
+		cm.Labels = make(map[string]string)
+	}
+	cm.Labels[v1alpha1.AuthConfigMapLabel] = "true"
+	return r.Patch(ctx, &cm, client.MergeFrom(base))
+}
+
 // enqueueCareInstructionForGardenCluster - enqueues the CareInstruction for the given Garden Cluster.
 func (r *CareInstructionReconciler) enqueueCareInstructionForGardenCluster(_ context.Context, obj client.Object) []ctrl.Request {
 	secret, ok := obj.(*corev1.Secret)
@@ -586,4 +626,30 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForCreatedClusters(_ c
 			},
 		},
 	}
+}
+
+// enqueueCareInstructionForAuthConfigMap enqueues all CareInstructions in the same namespace that reference
+// the changed auth ConfigMap via spec.authenticationConfigMapName.
+func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(ctx context.Context, obj client.Object) []ctrl.Request {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return nil
+	}
+
+	var ciList v1alpha1.CareInstructionList
+	if err := r.List(ctx, &ciList, client.InNamespace(cm.Namespace)); err != nil {
+		r.Error(err, "failed to list CareInstructions for auth ConfigMap change", "configMap", cm.Name, "namespace", cm.Namespace)
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for _, ci := range ciList.Items {
+		if ci.Spec.AuthenticationConfigMapName == cm.Name {
+			requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKey{Name: ci.Name, Namespace: ci.Namespace}})
+		}
+	}
+	if len(requests) > 0 {
+		r.Info("Enqueuing CareInstructions for auth ConfigMap change", "configMap", cm.Name, "namespace", cm.Namespace, "count", len(requests))
+	}
+	return requests
 }

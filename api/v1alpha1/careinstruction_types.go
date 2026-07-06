@@ -12,6 +12,7 @@ import (
 	"github.com/cloudoperators/greenhouse/pkg/cel"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -36,7 +37,7 @@ const (
 	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
-	AuthConfigMapLabel = "shoot-grafter.cloudoperators/authconfigmap"
+	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/auth-configmap"
 
 	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
 	ShootStatusOnboarded = "Onboarded"
@@ -155,7 +156,10 @@ type CareInstructionList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&CareInstruction{}, &CareInstructionList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &CareInstruction{}, &CareInstructionList{})
+		return nil
+	})
 }
 
 // ListShoots returns shoots matching the ShootSelector.LabelSelector.

@@ -41,23 +41,23 @@ var _ = Describe("Auth", func() {
 
 				// Verify ConfigMap data was updated
 				Expect(initialGardenConfigMap.Data).NotTo(BeNil())
-				Expect(initialGardenConfigMap.Data).To(HaveKey("config.yaml"))
+				Expect(initialGardenConfigMap.Data).To(HaveKey(authConfigMapKey))
 
-				// Verify other data keys are preserved (keys that are not "config.yaml")
+				// Verify other data keys are preserved (keys that are not authConfigMapKey)
 				for key, value := range expectedConfigMap.Data {
-					if key != "config.yaml" {
+					if key != authConfigMapKey {
 						Expect(initialGardenConfigMap.Data).To(HaveKeyWithValue(key, value))
 					}
 				}
 
 				// Unmarshal the actual result
 				var actualConfig apiserverv1beta1.AuthenticationConfiguration
-				err = yaml.Unmarshal([]byte(initialGardenConfigMap.Data["config.yaml"]), &actualConfig)
+				err = yaml.Unmarshal([]byte(initialGardenConfigMap.Data[authConfigMapKey]), &actualConfig)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Unmarshal the expected configuration
 				var expectedConfig apiserverv1beta1.AuthenticationConfiguration
-				err = yaml.Unmarshal([]byte(expectedConfigMap.Data["config.yaml"]), &expectedConfig)
+				err = yaml.Unmarshal([]byte(expectedConfigMap.Data[authConfigMapKey]), &expectedConfig)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Compare configurations
@@ -101,7 +101,7 @@ var _ = Describe("Auth", func() {
 				},
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -142,7 +142,7 @@ jwt:
 					Data: map[string]string{
 						"other-key":   "other-value",
 						"another-key": "another-value",
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -159,7 +159,7 @@ jwt:
 			Entry("with Garden ConfigMap having one different issuer (should add Greenhouse issuer)",
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -190,7 +190,7 @@ jwt:
 				},
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -214,7 +214,7 @@ jwt:
 			Entry("with Garden ConfigMap having the same issuer (Greenhouse should update it)",
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -245,7 +245,7 @@ jwt:
 				},
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -262,7 +262,7 @@ jwt:
 			Entry("with multiple Greenhouse issuers and multiple Garden issuers",
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -319,7 +319,7 @@ jwt:
 				},
 				&corev1.ConfigMap{
 					Data: map[string]string{
-						"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+						authConfigMapKey: `apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
 - issuer:
@@ -360,7 +360,7 @@ jwt:
 		It("should return error for invalid YAML in Garden ConfigMap", func() {
 			configMap := &corev1.ConfigMap{
 				Data: map[string]string{
-					"config.yaml": "invalid: yaml: content: [",
+					authConfigMapKey: "invalid: yaml: content: [",
 				},
 			}
 

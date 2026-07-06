@@ -148,6 +148,8 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Optionally configures OIDC authentication on Shoot clusters for Greenhouse access. Also see respective [Greenhouse docs](https://cloudoperators.github.io/greenhouse/docs/user-guides/cluster/oidc_connectivity/) and [Gardener docs](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
 
+> **Auth ConfigMap labeling & watch**: When `authenticationConfigMapName` is set, the shoot controller labels the referenced Greenhouse ConfigMap with `shoot-grafter.cloudoperators.dev/auth-configmap: "true"` on first interaction. The CareInstruction controller watches these labeled ConfigMaps; when the data changes, all CareInstructions referencing that ConfigMap are re-enqueued so the updated CM data is transported to the Garden cluster on the next reconcile. Multiple CareInstructions may reference the same ConfigMap.
+
 ## Custom Resource: CareInstruction
 
 A `CareInstruction` defines the configuration for onboarding Shoots from a specific Garden cluster.
@@ -208,7 +210,7 @@ spec:
 | `shootSelector.expression` | string | No | CEL expression for filtering shoots by status or other fields (max 1024 chars). The shoot object is available as `object` |
 | `propagateLabels` | []string | No | List of label keys to copy from Shoot to Greenhouse Cluster |
 | `additionalLabels` | map[string]string | No | Additional labels to add to all created Greenhouse Clusters |
-| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster)|
+| `authenticationConfigMapName` | string | No | Name of ConfigMap in Greenhouse cluster containing AuthenticationConfiguration [(config.yaml with apiserver.config.k8s.io/v1beta1 content)](https://gardener.cloud/docs/guides/administer-shoots/oidc-login/#configure-the-shoot-cluster). Multiple CareInstructions may share the same ConfigMap. |
 | `enableRBAC` | bool | No | When false, skips automatic RBAC setup on Shoot clusters (default: true‚) |
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
