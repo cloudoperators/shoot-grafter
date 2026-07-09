@@ -57,11 +57,12 @@ type garden struct {
 type careInstructionContextKey struct{}
 
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
+//+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;delete
 
 func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Setup the controller with the manager
