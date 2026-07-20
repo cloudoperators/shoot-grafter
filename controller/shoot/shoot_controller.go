@@ -126,7 +126,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	} else {
 		// Cluster exists - check ownership
 		if ownerLabel, hasLabel = existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
-			// TODO: emit event on CareInstruction
 			r.Info("Skipping shoot - cluster already owned by different CareInstruction",
 				"shoot", req.Name,
 				"currentOwner", ownerLabel,
@@ -330,13 +329,19 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 func (r *ShootController) RequestClusterDeletion(ctx context.Context, existingCluster greenhousev1alpha1.Cluster) error {
 	if err := r.GreenhouseClient.Delete(ctx, &existingCluster); err != nil {
-		if apierrors.IsNotFound(err) {
-			r.Info("requested Cluster removal when it is already gone", "name", existingCluster.Name)
-		}
+		r.Info(
+			"error during Cluster removal",
+			"name", existingCluster.Name,
+			"error", err.Error(),
+		)
 		return client.IgnoreNotFound(err)
 	}
 	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ClusterDeleted",
-		fmt.Sprintf("Deletion of Cluster %s/%s was requested", existingCluster.Namespace, existingCluster.Name))
+		fmt.Sprintf(
+			"Shoot %s/%s deleted, deletion of Cluster %s/%s was requested",
+			r.CareInstruction.Namespace, existingCluster.Name,
+			existingCluster.Namespace, existingCluster.Name,
+		))
 	return nil
 }
 

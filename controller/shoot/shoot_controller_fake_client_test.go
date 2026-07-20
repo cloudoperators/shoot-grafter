@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
-var _ = Describe("Shoot Controller", func() {
+var _ = Describe("Shoot Controller with fake client", func() {
 	AfterEach(func() {
 		clusters := &greenhousev1alpha1.ClusterList{}
 		Expect(test.K8sClient.List(test.Ctx, clusters, client.InNamespace("default"))).To(Succeed(), "should list Clusters")
@@ -30,7 +30,7 @@ var _ = Describe("Shoot Controller", func() {
 		}
 	})
 
-	When("a skeleton shoot controller is starting", func() {
+	When("a shoot controller with fake client is starting", func() {
 		BeforeEach(func() {
 			careInstruction = &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
