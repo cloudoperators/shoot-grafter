@@ -334,6 +334,13 @@ func (r *ShootController) RequestClusterDeletion(ctx context.Context, existingCl
 			"name", existingCluster.Name,
 			"error", err.Error(),
 		)
+		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ClusterDeletonFailed",
+			fmt.Sprintf(
+				"Shoot %s/%s deleted, deletion of Cluster %s/%s failed with error: %s",
+				r.CareInstruction.Namespace, existingCluster.Name,
+				existingCluster.Namespace, existingCluster.Name,
+				err.Error(),
+			))
 		return client.IgnoreNotFound(err)
 	}
 	r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ClusterDeleted",

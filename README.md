@@ -449,6 +449,7 @@ shoot-grafter emits the following events during Shoot reconciliation:
 | `CAConfigMapFetchFailed` | Failed to fetch CA certificate ConfigMap | Verify ConfigMap `<shoot-name>.ca-cluster` exists in Garden namespace |
 | `CADataMissing` | CA certificate data is empty in ConfigMap | Check ConfigMap data contains valid `ca.crt` entry |
 | `SecretOperationFailed` | Failed to create or update Greenhouse secret | Check RBAC permissions and Greenhouse cluster connectivity |
+| `ClusterDeletionFailed` | Failed to delete a Cluster in the Greenhouse | Check event details for the particular error reason |
 | `OIDCConfigurationFailed` | Failed to configure OIDC authentication on the Shoot | Verify AuthenticationConfigMap exists and contains valid configuration; check Garden cluster connectivity and permissions |
 | `ShootClientFetchFailed` | Failed to get Shoot cluster client | Verify Shoot is accessible and kubeconfig is valid; check network connectivity to Shoot cluster |
 | `RBACCreationFailed` | Failed to create RBAC ClusterRoleBinding on the Shoot | Check connectivity to Shoot cluster; verify service account has sufficient permissions |
