@@ -31,6 +31,22 @@ func PredicateHasLabel(key string) predicate.Predicate {
 	})
 }
 
+// PredicateAnnotationAddedOrUpdated fires on Create and on Update when the given annotation is present and its value has changed.
+func PredicateAnnotationAddedOrUpdated(key string) predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			_, exists := e.Object.GetAnnotations()[key]
+			return exists
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldVal, oldExists := e.ObjectOld.GetAnnotations()[key]
+			newVal, newExists := e.ObjectNew.GetAnnotations()[key]
+			return newExists && (!oldExists || oldVal != newVal)
+		},
+		DeleteFunc: func(_ event.DeleteEvent) bool { return false },
+	}
+}
+
 // PredicateConfigMapDataChanged fires on Create and on Update only when the ConfigMap Data changes.
 func PredicateConfigMapDataChanged() predicate.Predicate {
 	return predicate.Funcs{

@@ -70,6 +70,7 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.CareInstruction{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForGardenCluster), builder.WithPredicates(clientutil.PredicateFilterBySecretTypes(greenhouseapis.SecretTypeKubeConfig, greenhouseapis.SecretTypeOIDCConfig))).
 		Watches(&greenhousev1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForCreatedClusters), builder.WithPredicates(clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel))).
+		Watches(&greenhousev1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForClusterReconcileAnnotation), builder.WithPredicates(clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel), clientutil.PredicateAnnotationAddedOrUpdated(v1alpha1.ReconcileAnnotation))).
 		// Watch auth ConfigMaps; on data change, re-enqueue referencing CareInstructions.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForAuthConfigMap),
 			builder.WithPredicates(
@@ -144,6 +145,10 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				err.Error(),
 			),
 		)
+	}
+
+	if err := r.reconcileClusterReconcileAnnotations(ctx, &careInstruction); err != nil {
+		r.Error(err, "failed to reconcile cluster reconcile annotations")
 	}
 
 	return ctrl.Result{}, nil
@@ -503,6 +508,47 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	return nil
 }
 
+// reconcileClusterReconcileAnnotations finds Clusters owned by this CareInstruction that have the
+// greenhouse.sap/reconcile annotation, sets gardener.cloud/operation=reconcile on the matching Shoot,
+// and removes the annotation from the Cluster.
+func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+	clusters, err := careInstruction.ListClusters(ctx, r.Client)
+	if err != nil {
+		return err
+	}
+
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	r.gardensMu.RLock()
+	garden, exists := r.gardens[gardenKey]
+	r.gardensMu.RUnlock()
+	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
+		return nil
+	}
+	gardenClient := *garden.gardenClient
+	gardenNamespace := garden.careInstructionSpec.GardenNamespace
+
+	for i := range clusters.Items {
+		cluster := &clusters.Items[i]
+		if _, hasAnnotation := cluster.Annotations[v1alpha1.ReconcileAnnotation]; !hasAnnotation {
+			continue
+		}
+
+		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, cluster.Name, gardenNamespace); err != nil {
+			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
+			continue
+		}
+		r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name, "cluster", cluster.Name)
+
+		base := cluster.DeepCopy()
+		delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
+		if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
+			r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
+		}
+	}
+
+	return nil
+}
+
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
 func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Cleaning up CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
@@ -627,6 +673,22 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForCreatedClusters(_ c
 			},
 		},
 	}
+}
+
+// enqueueCareInstructionForClusterReconcileAnnotation enqueues the owning CareInstruction when greenhouse.sap/reconcile
+// is added or updated on a Greenhouse Cluster. The actual Shoot annotation is applied in Reconcile.
+func (r *CareInstructionReconciler) enqueueCareInstructionForClusterReconcileAnnotation(_ context.Context, obj client.Object) []ctrl.Request {
+	cluster, ok := obj.(*greenhousev1alpha1.Cluster)
+	if !ok {
+		return nil
+	}
+
+	careInstructionName, exists := cluster.Labels[v1alpha1.CareInstructionLabel]
+	if !exists {
+		return nil
+	}
+
+	return []ctrl.Request{{NamespacedName: client.ObjectKey{Name: careInstructionName, Namespace: cluster.Namespace}}}
 }
 
 // enqueueCareInstructionForAuthConfigMap enqueues all CareInstructions in the same namespace that reference
