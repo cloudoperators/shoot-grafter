@@ -587,23 +587,8 @@ func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Con
 		return nil
 	}
 
-	gardenClient := *garden.gardenClient
-	shoots, err := careInstruction.ListShoots(ctx, gardenClient)
-	if err != nil {
+	if err := r.annotateMatchingShoots(ctx, careInstruction, *garden.gardenClient, "auth ConfigMap change"); err != nil {
 		return err
-	}
-
-	for i := range shoots.Items {
-		s := &shoots.Items[i]
-		matches, err := careInstruction.MatchesCELFilter(s)
-		if err != nil || !matches {
-			continue
-		}
-		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, s.Name, s.Namespace); err != nil {
-			r.Error(err, "failed to annotate Shoot for reconciliation after auth ConfigMap change", "shoot", s.Name)
-			continue
-		}
-		r.Info("Annotated Shoot for reconciliation after auth ConfigMap change", "shoot", s.Name)
 	}
 
 	r.gardensMu.Lock()
@@ -628,8 +613,19 @@ func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(
 		r.Info("Garden client not ready, skipping CareInstruction reconcile annotation processing", "careInstruction", careInstruction.Name)
 		return nil
 	}
-	gardenClient := *garden.gardenClient
 
+	if err := r.annotateMatchingShoots(ctx, careInstruction, *garden.gardenClient, "CareInstruction reconcile annotation"); err != nil {
+		return err
+	}
+
+	base := careInstruction.DeepCopy()
+	delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
+	return r.Patch(ctx, careInstruction, client.MergeFrom(base))
+}
+
+// annotateMatchingShoots sets gardener.cloud/operation=reconcile on all Shoots matched by the
+// CareInstruction's selector and CEL filter. reason is included in log messages.
+func (r *CareInstructionReconciler) annotateMatchingShoots(ctx context.Context, careInstruction *v1alpha1.CareInstruction, gardenClient client.Client, reason string) error {
 	shoots, err := careInstruction.ListShoots(ctx, gardenClient)
 	if err != nil {
 		return err
@@ -642,15 +638,13 @@ func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(
 			continue
 		}
 		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, s.Name, s.Namespace); err != nil {
-			r.Error(err, "failed to annotate Shoot for reconciliation via CareInstruction annotation", "shoot", s.Name)
+			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", s.Name, "reason", reason)
 			continue
 		}
-		r.Info("Annotated Shoot for reconciliation via CareInstruction annotation", "shoot", s.Name)
+		r.Info("Annotated Shoot for reconciliation", "shoot", s.Name, "reason", reason)
 	}
 
-	base := careInstruction.DeepCopy()
-	delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
-	return r.Patch(ctx, careInstruction, client.MergeFrom(base))
+	return nil
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
