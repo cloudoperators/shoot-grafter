@@ -46,12 +46,13 @@ type CareInstructionReconciler struct {
 }
 
 type garden struct {
-	mgr                 ctrl.Manager                  // The manager for the garden cluster
-	gardenConfig        *rest.Config                  // The REST config for the garden cluster
-	gardenClient        *client.Client                // The client for the garden cluster
-	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
-	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
-	stopChan            chan bool                     // Channel to know if the manager is stopped
+	mgr                   ctrl.Manager                  // The manager for the garden cluster
+	gardenConfig          *rest.Config                  // The REST config for the garden cluster
+	gardenClient          *client.Client                // The client for the garden cluster
+	careInstructionSpec   *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
+	cancelFunc            context.CancelFunc            // Cancel function to stop the manager
+	stopChan              chan bool                     // Channel to know if the manager is stopped
+	authConfigMapRevision string                        // ResourceVersion of the last-seen auth ConfigMap
 }
 
 type careInstructionContextKey struct{}
@@ -133,6 +134,10 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			),
 		)
 		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileAuthConfigMapChange(ctx, &careInstruction); err != nil {
+		r.Error(err, "failed to reconcile auth ConfigMap change")
 	}
 
 	// reconcile Shoots and Clusters created by this CareInstruction
@@ -549,6 +554,64 @@ func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx con
 			r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
 		}
 	}
+
+	return nil
+}
+
+// reconcileAuthConfigMapChange detects when the auth ConfigMap's data has changed since the last
+// reconcile and fans out gardener.cloud/operation=reconcile to all matching Shoots so they pick up
+// the new OIDC configuration.
+func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+	if careInstruction.Spec.AuthenticationConfigMapName == "" {
+		return nil
+	}
+
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	r.gardensMu.RLock()
+	garden, exists := r.gardens[gardenKey]
+	r.gardensMu.RUnlock()
+	if !exists || garden.gardenClient == nil {
+		return nil
+	}
+
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: careInstruction.Namespace,
+		Name:      careInstruction.Spec.AuthenticationConfigMapName,
+	}, &cm); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+
+	r.gardensMu.RLock()
+	lastRevision := r.gardens[gardenKey].authConfigMapRevision
+	r.gardensMu.RUnlock()
+
+	if cm.ResourceVersion == lastRevision {
+		return nil
+	}
+
+	gardenClient := *garden.gardenClient
+	shoots, err := careInstruction.ListShoots(ctx, gardenClient)
+	if err != nil {
+		return err
+	}
+
+	for i := range shoots.Items {
+		s := &shoots.Items[i]
+		matches, err := careInstruction.MatchesCELFilter(s)
+		if err != nil || !matches {
+			continue
+		}
+		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, s.Name, s.Namespace); err != nil {
+			r.Error(err, "failed to annotate Shoot for reconciliation after auth ConfigMap change", "shoot", s.Name)
+			continue
+		}
+		r.Info("Annotated Shoot for reconciliation after auth ConfigMap change", "shoot", s.Name)
+	}
+
+	r.gardensMu.Lock()
+	r.gardens[gardenKey].authConfigMapRevision = cm.ResourceVersion
+	r.gardensMu.Unlock()
 
 	return nil
 }
