@@ -531,6 +531,7 @@ func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx con
 	garden, exists := r.gardens[gardenKey]
 	r.gardensMu.RUnlock()
 	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
+		r.Info("Garden client not ready, skipping Cluster reconcile annotation processing", "careInstruction", careInstruction.Name)
 		return nil
 	}
 	gardenClient := *garden.gardenClient
@@ -582,11 +583,7 @@ func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Con
 		return client.IgnoreNotFound(err)
 	}
 
-	r.gardensMu.RLock()
-	lastRevision := r.gardens[gardenKey].authConfigMapRevision
-	r.gardensMu.RUnlock()
-
-	if cm.ResourceVersion == lastRevision {
+	if cm.ResourceVersion == garden.authConfigMapRevision {
 		return nil
 	}
 
@@ -628,6 +625,7 @@ func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(
 	garden, exists := r.gardens[gardenKey]
 	r.gardensMu.RUnlock()
 	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
+		r.Info("Garden client not ready, skipping CareInstruction reconcile annotation processing", "careInstruction", careInstruction.Name)
 		return nil
 	}
 	gardenClient := *garden.gardenClient
