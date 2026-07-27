@@ -151,6 +151,10 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.Error(err, "failed to reconcile cluster reconcile annotations")
 	}
 
+	if err := r.reconcileCareInstructionReconcileAnnotation(ctx, &careInstruction); err != nil {
+		r.Error(err, "failed to reconcile careinstruction reconcile annotation")
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -547,6 +551,45 @@ func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx con
 	}
 
 	return nil
+}
+
+// reconcileCareInstructionReconcileAnnotation fans out gardener.cloud/operation=reconcile to all matching Shoots
+// when greenhouse.sap/reconcile is set on the CareInstruction, then removes the annotation.
+func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+	if _, hasAnnotation := careInstruction.Annotations[v1alpha1.ReconcileAnnotation]; !hasAnnotation {
+		return nil
+	}
+
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	r.gardensMu.RLock()
+	garden, exists := r.gardens[gardenKey]
+	r.gardensMu.RUnlock()
+	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
+		return nil
+	}
+	gardenClient := *garden.gardenClient
+
+	shoots, err := careInstruction.ListShoots(ctx, gardenClient)
+	if err != nil {
+		return err
+	}
+
+	for i := range shoots.Items {
+		s := &shoots.Items[i]
+		matches, err := careInstruction.MatchesCELFilter(s)
+		if err != nil || !matches {
+			continue
+		}
+		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, s.Name, s.Namespace); err != nil {
+			r.Error(err, "failed to annotate Shoot for reconciliation via CareInstruction annotation", "shoot", s.Name)
+			continue
+		}
+		r.Info("Annotated Shoot for reconciliation via CareInstruction annotation", "shoot", s.Name)
+	}
+
+	base := careInstruction.DeepCopy()
+	delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
+	return r.Patch(ctx, careInstruction, client.MergeFrom(base))
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
