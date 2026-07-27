@@ -543,11 +543,11 @@ func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx con
 			continue
 		}
 
-		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, cluster.Name, gardenNamespace); err != nil {
+		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, gardenNamespace, cluster.Name); err != nil {
 			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
 			continue
 		}
-		r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name, "cluster", cluster.Name)
+		r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
 
 		base := cluster.DeepCopy()
 		delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
@@ -598,7 +598,7 @@ func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Con
 
 	for i := range shoots {
 		s := &shoots[i]
-		if err := shoot.AnnotateShootForReconcile(ctx, *garden.gardenClient, s.Name, s.Namespace); err != nil {
+		if err := shoot.AnnotateShootForReconcile(ctx, *garden.gardenClient, s.Namespace, s.Name); err != nil {
 			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", s.Name, "reason", "auth ConfigMap change")
 			continue
 		}
@@ -629,7 +629,7 @@ func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(
 	}
 	for i := range shoots {
 		s := &shoots[i]
-		if err := shoot.AnnotateShootForReconcile(ctx, *garden.gardenClient, s.Name, s.Namespace); err != nil {
+		if err := shoot.AnnotateShootForReconcile(ctx, *garden.gardenClient, s.Namespace, s.Name); err != nil {
 			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", s.Name, "reason", "CareInstruction reconcile annotation")
 			continue
 		}

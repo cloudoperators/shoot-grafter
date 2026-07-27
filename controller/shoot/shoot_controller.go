@@ -358,7 +358,7 @@ func GenerateName(gardenClusterName string) string {
 }
 
 // AnnotateShootForReconcile sets gardener.cloud/operation: reconcile on the named Shoot.
-func AnnotateShootForReconcile(ctx context.Context, gardenClient client.Client, name, namespace string) error {
+func AnnotateShootForReconcile(ctx context.Context, gardenClient client.Client, namespace, name string) error {
 	var s gardenerv1beta1.Shoot
 	if err := gardenClient.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &s); err != nil {
 		return fmt.Errorf("failed to get Shoot %s/%s: %w", namespace, name, err)
