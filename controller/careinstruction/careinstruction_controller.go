@@ -650,7 +650,11 @@ func (r *CareInstructionReconciler) listMatchingShoots(ctx context.Context, care
 	for i := range all.Items {
 		s := &all.Items[i]
 		matches, err := careInstruction.MatchesCELFilter(s)
-		if err != nil || !matches {
+		if err != nil {
+			r.Error(err, "CEL filter evaluation failed, skipping Shoot", "shoot", s.Name)
+			continue
+		}
+		if !matches {
 			continue
 		}
 		matched = append(matched, *s)
