@@ -71,7 +71,6 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.CareInstruction{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForGardenCluster), builder.WithPredicates(clientutil.PredicateFilterBySecretTypes(greenhouseapis.SecretTypeKubeConfig, greenhouseapis.SecretTypeOIDCConfig))).
 		Watches(&greenhousev1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForCreatedClusters), builder.WithPredicates(clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel))).
-		Watches(&greenhousev1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForClusterReconcileAnnotation), builder.WithPredicates(clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel), clientutil.PredicateAnnotationAddedOrUpdated(v1alpha1.ReconcileAnnotation))).
 		// Watch auth ConfigMaps; on data change, re-enqueue referencing CareInstructions.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueCareInstructionForAuthConfigMap),
 			builder.WithPredicates(
@@ -783,22 +782,6 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForCreatedClusters(_ c
 			},
 		},
 	}
-}
-
-// enqueueCareInstructionForClusterReconcileAnnotation enqueues the owning CareInstruction when greenhouse.sap/reconcile
-// is added or updated on a Greenhouse Cluster. The actual Shoot annotation is applied in Reconcile.
-func (r *CareInstructionReconciler) enqueueCareInstructionForClusterReconcileAnnotation(_ context.Context, obj client.Object) []ctrl.Request {
-	cluster, ok := obj.(*greenhousev1alpha1.Cluster)
-	if !ok {
-		return nil
-	}
-
-	careInstructionName, exists := cluster.Labels[v1alpha1.CareInstructionLabel]
-	if !exists {
-		return nil
-	}
-
-	return []ctrl.Request{{NamespacedName: client.ObjectKey{Name: careInstructionName, Namespace: cluster.Namespace}}}
 }
 
 // enqueueCareInstructionForAuthConfigMap enqueues all CareInstructions in the same namespace that reference
