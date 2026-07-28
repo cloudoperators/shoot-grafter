@@ -135,10 +135,6 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileAuthConfigMapChange(ctx, &careInstruction); err != nil {
-		r.Error(err, "failed to reconcile auth ConfigMap change")
-	}
-
 	// reconcile Shoots and Clusters created by this CareInstruction
 	if err := r.reconcileShootsNClusters(ctx, &careInstruction); err != nil {
 		r.Info("failed to reconcile shoots and clusters for CareInstruction, will retry", "error", err.Error())
@@ -152,11 +148,15 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if err := r.reconcileClusterReconcileAnnotations(ctx, &careInstruction); err != nil {
-		r.Error(err, "failed to reconcile cluster reconcile annotations")
+		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileCareInstructionReconcileAnnotation(ctx, &careInstruction); err != nil {
-		r.Error(err, "failed to reconcile careinstruction reconcile annotation")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileAuthConfigMapChange(ctx, &careInstruction); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
