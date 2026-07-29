@@ -997,28 +997,9 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
-	Context("When a CareInstruction has the greenhouse.sap/reconcile annotation", func() {
-		It("should annotate all matching Shoots and remove the annotation", func() {
-			By("creating two Shoots on the garden cluster")
-			shoot1 := &gardenerv1beta1.Shoot{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "ci-reconcile-shoot-1",
-					Namespace: "default",
-					Labels:    map[string]string{"test": "ci-reconcile"},
-				},
-			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, shoot1)).To(Succeed())
-
-			shoot2 := &gardenerv1beta1.Shoot{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "ci-reconcile-shoot-2",
-					Namespace: "default",
-					Labels:    map[string]string{"test": "ci-reconcile"},
-				},
-			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, shoot2)).To(Succeed())
-
-			By("creating a CareInstruction targeting those Shoots")
+	Context("When a CareInstruction has the shoot-grafter.cloudoperators.dev/reconcile annotation", func() {
+		It("should restart the shoot controller and remove the annotation", func() {
+			By("creating a CareInstruction")
 			ci := &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-ci-reconcile-annotation",
@@ -1026,11 +1007,6 @@ var _ = Describe("CareInstruction Controller", func() {
 				},
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName: test.GardenClusterName,
-					ShootSelector: &v1alpha1.ShootSelector{
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"test": "ci-reconcile"},
-						},
-					},
 				},
 			}
 			Expect(test.K8sClient.Create(test.Ctx, ci)).To(Succeed())
@@ -1043,7 +1019,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(cond.IsTrue()).To(BeTrue())
 			}).Should(Succeed())
 
-			By("annotating the CareInstruction with greenhouse.sap/reconcile")
+			By("annotating the CareInstruction with the reconcile annotation")
 			base := ci.DeepCopy()
 			if ci.Annotations == nil {
 				ci.Annotations = make(map[string]string)
@@ -1057,13 +1033,13 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(ci.Annotations).NotTo(HaveKey(v1alpha1.ReconcileAnnotation))
 			}).Should(Succeed())
 
-			By("verifying gardener.cloud/operation=reconcile is set on each Shoot")
-			for _, shootObj := range []*gardenerv1beta1.Shoot{shoot1, shoot2} {
-				Eventually(func(g Gomega) {
-					g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shootObj), shootObj)).To(Succeed())
-					g.Expect(shootObj.Annotations).To(HaveKeyWithValue("gardener.cloud/operation", "reconcile"))
-				}).Should(Succeed(), "Shoot %s should have gardener.cloud/operation=reconcile", shootObj.Name)
-			}
+			By("verifying the shoot controller restarts")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.IsTrue()).To(BeTrue())
+			}).Should(Succeed())
 		})
 	})
 
@@ -1410,7 +1386,7 @@ var _ = Describe("CareInstruction Controller", func() {
 	})
 
 	Context("When the auth ConfigMap data changes", func() {
-		It("should annotate all matching Shoots for reconciliation", func() {
+		It("should restart the shoot controller", func() {
 			By("creating an auth ConfigMap")
 			authCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1421,25 +1397,6 @@ var _ = Describe("CareInstruction Controller", func() {
 			}
 			Expect(test.K8sClient.Create(test.Ctx, authCM)).To(Succeed())
 
-			By("creating two Shoots on the garden cluster")
-			shoot1 := &gardenerv1beta1.Shoot{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "auth-cm-shoot-1",
-					Namespace: "default",
-					Labels:    map[string]string{"test": "auth-cm-change"},
-				},
-			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, shoot1)).To(Succeed())
-
-			shoot2 := &gardenerv1beta1.Shoot{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "auth-cm-shoot-2",
-					Namespace: "default",
-					Labels:    map[string]string{"test": "auth-cm-change"},
-				},
-			}
-			Expect(test.GardenK8sClient.Create(test.Ctx, shoot2)).To(Succeed())
-
 			By("creating a CareInstruction with authenticationConfigMapName set")
 			ci := &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1449,11 +1406,6 @@ var _ = Describe("CareInstruction Controller", func() {
 				Spec: v1alpha1.CareInstructionSpec{
 					GardenClusterName:           test.GardenClusterName,
 					AuthenticationConfigMapName: authCM.Name,
-					ShootSelector: &v1alpha1.ShootSelector{
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"test": "auth-cm-change"},
-						},
-					},
 				},
 			}
 			Expect(test.K8sClient.Create(test.Ctx, ci)).To(Succeed())
@@ -1466,18 +1418,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(cond.IsTrue()).To(BeTrue())
 			}).Should(Succeed())
 
-			By("waiting for and clearing the initial fan-out triggered by first reconcile")
-			for _, shootObj := range []*gardenerv1beta1.Shoot{shoot1, shoot2} {
-				Eventually(func(g Gomega) {
-					g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shootObj), shootObj)).To(Succeed())
-					g.Expect(shootObj.Annotations).To(HaveKey("gardener.cloud/operation"))
-				}).Should(Succeed())
-				base := shootObj.DeepCopy()
-				delete(shootObj.Annotations, "gardener.cloud/operation")
-				Expect(test.GardenK8sClient.Patch(test.Ctx, shootObj, client.MergeFrom(base))).To(Succeed())
-			}
-
-			By("updating only ConfigMap metadata and verifying no Shoot annotation is set")
+			By("updating only ConfigMap metadata and verifying the shoot controller does not restart")
 			base := authCM.DeepCopy()
 			if authCM.Labels == nil {
 				authCM.Labels = map[string]string{}
@@ -1485,41 +1426,34 @@ var _ = Describe("CareInstruction Controller", func() {
 			authCM.Labels["some-label"] = "some-value"
 			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
 			test.ReconcileObject(ci)
-			for _, shootObj := range []*gardenerv1beta1.Shoot{shoot1, shoot2} {
-				Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shootObj), shootObj)).To(Succeed())
-				Expect(shootObj.Annotations).NotTo(HaveKey("gardener.cloud/operation"))
-			}
+			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+			cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.IsTrue()).To(BeTrue())
 
-			By("updating the auth ConfigMap data")
+			By("updating the auth ConfigMap data and verifying the shoot controller restarts")
 			base = authCM.DeepCopy()
 			authCM.Data["config.yaml"] = "v2"
 			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
 
-			By("verifying gardener.cloud/operation=reconcile is set on each Shoot")
-			for _, shootObj := range []*gardenerv1beta1.Shoot{shoot1, shoot2} {
-				Eventually(func(g Gomega) {
-					g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shootObj), shootObj)).To(Succeed())
-					g.Expect(shootObj.Annotations).To(HaveKeyWithValue("gardener.cloud/operation", "reconcile"))
-				}).Should(Succeed(), "Shoot %s should have gardener.cloud/operation=reconcile", shootObj.Name)
-			}
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.IsTrue()).To(BeTrue())
+			}).Should(Succeed())
 
-			By("verifying a second CM update also triggers a new fan-out")
-			for _, shootObj := range []*gardenerv1beta1.Shoot{shoot1, shoot2} {
-				base := shootObj.DeepCopy()
-				delete(shootObj.Annotations, "gardener.cloud/operation")
-				Expect(test.GardenK8sClient.Patch(test.Ctx, shootObj, client.MergeFrom(base))).To(Succeed())
-			}
-
+			By("verifying a second CM data update also triggers a restart")
 			base = authCM.DeepCopy()
 			authCM.Data["config.yaml"] = "v3"
 			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
 
-			for _, shootObj := range []*gardenerv1beta1.Shoot{shoot1, shoot2} {
-				Eventually(func(g Gomega) {
-					g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shootObj), shootObj)).To(Succeed())
-					g.Expect(shootObj.Annotations).To(HaveKeyWithValue("gardener.cloud/operation", "reconcile"))
-				}).Should(Succeed(), "Shoot %s should have gardener.cloud/operation=reconcile after second CM update", shootObj.Name)
-			}
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.IsTrue()).To(BeTrue())
+			}).Should(Succeed())
 		})
 	})
 

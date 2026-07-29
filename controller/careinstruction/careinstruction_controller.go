@@ -530,8 +530,8 @@ func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx con
 	garden, exists := r.gardens[gardenKey]
 	r.gardensMu.RUnlock()
 	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
-		r.Info("Garden client not ready, skipping Cluster reconcile annotation processing", "careInstruction", careInstruction.Name)
-		return nil
+		// TODO: set a status condition here once trigger failures are reported via ShootsReconciled condition
+		return errors.New("garden client not ready, cannot process Cluster reconcile annotations")
 	}
 	gardenClient := *garden.gardenClient
 	gardenNamespace := garden.careInstructionSpec.GardenNamespace
@@ -559,8 +559,7 @@ func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx con
 }
 
 // reconcileAuthConfigMapChange detects when the auth ConfigMap's data has changed since the last
-// reconcile and fans out gardener.cloud/operation=reconcile to all matching Shoots so they pick up
-// the new OIDC configuration.
+// reconcile and restarts the shoot controller so it re-applies the new OIDC configuration to all Shoots.
 func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	if careInstruction.Spec.AuthenticationConfigMapName == "" {
 		return nil
@@ -586,80 +585,41 @@ func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Con
 		return nil
 	}
 
-	shoots, err := r.listMatchingShoots(ctx, careInstruction, *garden.gardenClient)
-	if err != nil {
-		return err
-	}
-
 	r.gardensMu.Lock()
 	r.gardens[gardenKey].authConfigMapRevision = cm.ResourceVersion
 	r.gardensMu.Unlock()
 
-	for i := range shoots {
-		s := &shoots[i]
-		if err := shoot.AnnotateShootForReconcile(ctx, *garden.gardenClient, s.Namespace, s.Name); err != nil {
-			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", s.Name, "reason", "auth ConfigMap change")
-			continue
-		}
-		r.Info("Annotated Shoot for reconciliation", "shoot", s.Name, "reason", "auth ConfigMap change")
-	}
+	r.restartShootController(careInstruction)
 	return nil
 }
 
-// reconcileCareInstructionReconcileAnnotation fans out gardener.cloud/operation=reconcile to all matching Shoots
-// when greenhouse.sap/reconcile is set on the CareInstruction, then removes the annotation.
+// reconcileCareInstructionReconcileAnnotation restarts the shoot controller when the ReconcileAnnotation
+// is set on the CareInstruction, then removes the annotation. Restarting the controller ensures all
+// shoot-grafter config (auth, labels) is re-applied to all matching Shoots.
 func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	if _, hasAnnotation := careInstruction.Annotations[v1alpha1.ReconcileAnnotation]; !hasAnnotation {
 		return nil
 	}
 
-	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
-	r.gardensMu.RLock()
-	garden, exists := r.gardens[gardenKey]
-	r.gardensMu.RUnlock()
-	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
-		r.Info("Garden client not ready, skipping CareInstruction reconcile annotation processing", "careInstruction", careInstruction.Name)
-		return nil
-	}
-
-	shoots, err := r.listMatchingShoots(ctx, careInstruction, *garden.gardenClient)
-	if err != nil {
-		return err
-	}
-	for i := range shoots {
-		s := &shoots[i]
-		if err := shoot.AnnotateShootForReconcile(ctx, *garden.gardenClient, s.Namespace, s.Name); err != nil {
-			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", s.Name, "reason", "CareInstruction reconcile annotation")
-			continue
-		}
-		r.Info("Annotated Shoot for reconciliation", "shoot", s.Name, "reason", "CareInstruction reconcile annotation")
-	}
+	r.restartShootController(careInstruction)
 
 	base := careInstruction.DeepCopy()
 	delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
 	return r.Patch(ctx, careInstruction, client.MergeFrom(base))
 }
 
-// listMatchingShoots returns all Shoots that pass the CareInstruction's label selector and CEL filter.
-func (r *CareInstructionReconciler) listMatchingShoots(ctx context.Context, careInstruction *v1alpha1.CareInstruction, gardenClient client.Client) ([]gardenerv1beta1.Shoot, error) {
-	all, err := careInstruction.ListShoots(ctx, gardenClient)
-	if err != nil {
-		return nil, err
+// restartShootController cancels the garden manager for the given CareInstruction so that
+// reconcileManager recreates it on the next reconcile, re-applying all shoot-grafter config.
+func (r *CareInstructionReconciler) restartShootController(careInstruction *v1alpha1.CareInstruction) {
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	r.gardensMu.RLock()
+	garden, exists := r.gardens[gardenKey]
+	r.gardensMu.RUnlock()
+	if !exists || garden.cancelFunc == nil {
+		return
 	}
-	var matched []gardenerv1beta1.Shoot
-	for i := range all.Items {
-		s := &all.Items[i]
-		matches, err := careInstruction.MatchesCELFilter(s)
-		if err != nil {
-			r.Error(err, "CEL filter evaluation failed, skipping Shoot", "shoot", s.Name)
-			continue
-		}
-		if !matches {
-			continue
-		}
-		matched = append(matched, *s)
-	}
-	return matched, nil
+	r.Info("Restarting shoot controller", "careInstruction", careInstruction.Name)
+	garden.cancelFunc()
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
