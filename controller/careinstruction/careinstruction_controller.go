@@ -147,10 +147,6 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		)
 	}
 
-	if err := r.reconcileCareInstructionReconcileAnnotation(ctx, &careInstruction); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if err := r.reconcileAuthConfigMapChange(ctx, &careInstruction); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -376,6 +372,16 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	gardenClient := garden.gardenClient
 	r.gardensMu.RUnlock()
 
+	// Handle CareInstruction reconcile annotation: restart the shoot controller so it re-applies all config.
+	if _, hasAnnotation := careInstruction.Annotations[v1alpha1.ReconcileAnnotation]; hasAnnotation {
+		r.restartShootController(careInstruction)
+		base := careInstruction.DeepCopy()
+		delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
+		if err := r.Patch(ctx, careInstruction, client.MergeFrom(base)); err != nil {
+			return err
+		}
+	}
+
 	// List all shoots targeted by this CareInstruction
 	shoots, err := careInstruction.ListShoots(ctx, *gardenClient)
 	if client.IgnoreNotFound(err) != nil {
@@ -562,21 +568,6 @@ func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Con
 
 	r.restartShootController(careInstruction)
 	return nil
-}
-
-// reconcileCareInstructionReconcileAnnotation restarts the shoot controller when the ReconcileAnnotation
-// is set on the CareInstruction, then removes the annotation. Restarting the controller ensures all
-// shoot-grafter config (auth, labels) is re-applied to all matching Shoots.
-func (r *CareInstructionReconciler) reconcileCareInstructionReconcileAnnotation(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
-	if _, hasAnnotation := careInstruction.Annotations[v1alpha1.ReconcileAnnotation]; !hasAnnotation {
-		return nil
-	}
-
-	r.restartShootController(careInstruction)
-
-	base := careInstruction.DeepCopy()
-	delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
-	return r.Patch(ctx, careInstruction, client.MergeFrom(base))
 }
 
 // restartShootController cancels the garden manager for the given CareInstruction so that
