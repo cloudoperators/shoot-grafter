@@ -147,10 +147,6 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		)
 	}
 
-	if err := r.reconcileAuthConfigMapChange(ctx, &careInstruction); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -416,6 +412,22 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		}
 	}
 
+	// Handle auth ConfigMap change: restart the shoot controller when CM data changes.
+	if careInstruction.Spec.AuthenticationConfigMapName != "" {
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: careInstruction.Namespace,
+			Name:      careInstruction.Spec.AuthenticationConfigMapName,
+		}, &cm); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		} else if err == nil && cm.ResourceVersion != garden.authConfigMapRevision {
+			r.gardensMu.Lock()
+			r.gardens[gardenKey].authConfigMapRevision = cm.ResourceVersion
+			r.gardensMu.Unlock()
+			r.restartShootController(careInstruction)
+		}
+	}
+
 	defer UpdateCareInstructionMetrics(careInstruction)
 
 	// List all clusters created by this CareInstruction
@@ -532,41 +544,6 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		),
 	)
 
-	return nil
-}
-
-// reconcileAuthConfigMapChange detects when the auth ConfigMap's data has changed since the last
-// reconcile and restarts the shoot controller so it re-applies the new OIDC configuration to all Shoots.
-func (r *CareInstructionReconciler) reconcileAuthConfigMapChange(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
-	if careInstruction.Spec.AuthenticationConfigMapName == "" {
-		return nil
-	}
-
-	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
-	r.gardensMu.RLock()
-	garden, exists := r.gardens[gardenKey]
-	r.gardensMu.RUnlock()
-	if !exists || garden.gardenClient == nil {
-		return nil
-	}
-
-	var cm corev1.ConfigMap
-	if err := r.Get(ctx, client.ObjectKey{
-		Namespace: careInstruction.Namespace,
-		Name:      careInstruction.Spec.AuthenticationConfigMapName,
-	}, &cm); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-
-	if cm.ResourceVersion == garden.authConfigMapRevision {
-		return nil
-	}
-
-	r.gardensMu.Lock()
-	r.gardens[gardenKey].authConfigMapRevision = cm.ResourceVersion
-	r.gardensMu.Unlock()
-
-	r.restartShootController(careInstruction)
 	return nil
 }
 
