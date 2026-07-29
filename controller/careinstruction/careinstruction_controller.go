@@ -147,10 +147,6 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		)
 	}
 
-	if err := r.reconcileClusterReconcileAnnotations(ctx, &careInstruction); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if err := r.reconcileCareInstructionReconcileAnnotation(ctx, &careInstruction); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -376,7 +372,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
 	r.gardensMu.RLock()
-	gardenClient := r.gardens[gardenKey].gardenClient
+	garden := r.gardens[gardenKey]
+	gardenClient := garden.gardenClient
 	r.gardensMu.RUnlock()
 
 	// List all shoots targeted by this CareInstruction
@@ -432,7 +429,8 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		existingClusterNames[cluster.Name] = true
 	}
 
-	for _, cluster := range clusters.Items {
+	for i := range clusters.Items {
+		cluster := &clusters.Items[i]
 		shootStatus := v1alpha1.ShootStatus{
 			Name: cluster.Name,
 		}
@@ -449,6 +447,21 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		}
 
 		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
+
+		// Handle Cluster reconcile annotation: annotate the matching Shoot and remove the annotation.
+		if _, hasAnnotation := cluster.Annotations[v1alpha1.ReconcileAnnotation]; hasAnnotation {
+			gardenNamespace := garden.careInstructionSpec.GardenNamespace
+			if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
+				r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
+			} else {
+				r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
+				base := cluster.DeepCopy()
+				delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
+				if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
+					r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
+				}
+			}
+		}
 	}
 
 	effectiveShootCount := len(includedShoots)
@@ -512,48 +525,6 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			"All shoots and clusters are reconciled",
 		),
 	)
-
-	return nil
-}
-
-// reconcileClusterReconcileAnnotations finds Clusters owned by this CareInstruction that have the
-// greenhouse.sap/reconcile annotation, sets gardener.cloud/operation=reconcile on the matching Shoot,
-// and removes the annotation from the Cluster.
-func (r *CareInstructionReconciler) reconcileClusterReconcileAnnotations(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
-	clusters, err := careInstruction.ListClusters(ctx, r.Client)
-	if err != nil {
-		return err
-	}
-
-	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
-	r.gardensMu.RLock()
-	garden, exists := r.gardens[gardenKey]
-	r.gardensMu.RUnlock()
-	if !exists || garden.gardenClient == nil || garden.careInstructionSpec == nil {
-		// TODO: set a status condition here once trigger failures are reported via ShootsReconciled condition
-		return errors.New("garden client not ready, cannot process Cluster reconcile annotations")
-	}
-	gardenClient := *garden.gardenClient
-	gardenNamespace := garden.careInstructionSpec.GardenNamespace
-
-	for i := range clusters.Items {
-		cluster := &clusters.Items[i]
-		if _, hasAnnotation := cluster.Annotations[v1alpha1.ReconcileAnnotation]; !hasAnnotation {
-			continue
-		}
-
-		if err := shoot.AnnotateShootForReconcile(ctx, gardenClient, gardenNamespace, cluster.Name); err != nil {
-			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
-			continue
-		}
-		r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
-
-		base := cluster.DeepCopy()
-		delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
-		if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
-			r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
-		}
-	}
 
 	return nil
 }
