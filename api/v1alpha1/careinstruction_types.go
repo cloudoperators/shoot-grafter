@@ -39,9 +39,8 @@ const (
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
 	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/auth-configmap"
 
-	// ReconcileAnnotation can be set on a Greenhouse Cluster or CareInstruction to trigger reconciliation
-	// of the matching Shoot(s).
-	ReconcileAnnotation = "greenhouse.sap/reconcile"
+	// ReconcileAnnotation can be set on a Cluster or CareInstruction to trigger reconciliation of the matching Shoot(s).
+	ReconcileAnnotation = "shoot-grafter.cloudoperators.dev/reconcile"
 
 	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
 	ShootStatusOnboarded = "Onboarded"
