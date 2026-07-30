@@ -1043,7 +1043,7 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
-	Context("When a Greenhouse Cluster has the greenhouse.sap/reconcile annotation", func() {
+	Context("When a Greenhouse Cluster has the shoot-grafter.cloudoperators.dev/reconcile annotation", func() {
 		It("should annotate the matching Shoot and remove the annotation from the Cluster", func() {
 			By("creating a Shoot on the garden cluster")
 			shoot := &gardenerv1beta1.Shoot{
@@ -1096,7 +1096,7 @@ var _ = Describe("CareInstruction Controller", func() {
 			}
 			Expect(test.K8sClient.Create(test.Ctx, cluster)).To(Succeed())
 
-			By("annotating the Cluster with greenhouse.sap/reconcile")
+			By("annotating the Cluster with shoot-grafter.cloudoperators.dev/reconcile")
 			base := cluster.DeepCopy()
 			cluster.Annotations = map[string]string{v1alpha1.ReconcileAnnotation: "true"}
 			Expect(test.K8sClient.Patch(test.Ctx, cluster, client.MergeFrom(base))).To(Succeed())

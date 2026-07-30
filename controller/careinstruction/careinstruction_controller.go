@@ -173,19 +173,36 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	// Use namespace-qualified key to prevent collisions between CareInstructions with the same name in different namespaces
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
 
-	// Initialize gardens map if needed (with write lock)
+	r.gardensMu.RLock()
+	_, gardenEntryExists := r.gardens[gardenKey]
+	r.gardensMu.RUnlock()
+
+	initialAuthCMRevision := ""
+	if !gardenEntryExists && careInstruction.Spec.AuthenticationConfigMapName != "" {
+		// Seed the revision so the first reconcile does not trigger a spurious controller restart.
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: careInstruction.Namespace,
+			Name:      careInstruction.Spec.AuthenticationConfigMapName,
+		}, &cm); err == nil {
+			initialAuthCMRevision = cm.ResourceVersion
+		}
+	}
+
+	// Initialize gardens map if needed.
 	r.gardensMu.Lock()
 	if r.gardens == nil {
 		r.gardens = make(map[string]*garden)
 	}
 	if _, exists := r.gardens[gardenKey]; !exists {
 		r.gardens[gardenKey] = &garden{
-			mgr:                 nil,
-			gardenConfig:        nil,
-			gardenClient:        nil,
-			careInstructionSpec: &careInstruction.Spec,
-			cancelFunc:          nil,
-			stopChan:            nil,
+			mgr:                   nil,
+			gardenConfig:          nil,
+			gardenClient:          nil,
+			careInstructionSpec:   &careInstruction.Spec,
+			cancelFunc:            nil,
+			stopChan:              nil,
+			authConfigMapRevision: initialAuthCMRevision,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -360,6 +377,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
 	careInstruction.Status.Shoots = []v1alpha1.ShootStatus{}
+	defer UpdateCareInstructionMetrics(careInstruction)
 
 	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
@@ -427,8 +445,6 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			r.restartShootController(careInstruction)
 		}
 	}
-
-	defer UpdateCareInstructionMetrics(careInstruction)
 
 	// List all clusters created by this CareInstruction
 	clusters, err := careInstruction.ListClusters(ctx, r.Client)
