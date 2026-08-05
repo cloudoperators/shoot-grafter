@@ -5,6 +5,7 @@ package careinstruction_test
 
 import (
 	"shoot-grafter/api/v1alpha1"
+	"shoot-grafter/controller/careinstruction"
 	"shoot-grafter/internal/test"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
@@ -12,6 +13,8 @@ import (
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1380,6 +1383,99 @@ var _ = Describe("CareInstruction Controller", func() {
 				}
 				return true
 			}).Should(BeTrue())
+		})
+
+		It("should report a previously onboarded shoot only once when it stops matching the CEL expression", func() {
+			By("Creating a healthy shoot that matches the CEL expression")
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-shoot-regressed",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-regression"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				LastOperation: &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+			careInstruction := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cel-regression",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "cel-regression"},
+						},
+						Expression: `object.status.lastOperation.state == "Succeeded"`,
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed())
+
+			By("Onboarding the shoot by creating an owned, ready cluster")
+			cluster := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot.Name,
+					Namespace: "default",
+					Labels:    map[string]string{v1alpha1.CareInstructionLabel: careInstruction.Name},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{AccessMode: greenhousev1alpha1.ClusterAccessModeDirect},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster)).To(Succeed())
+			cluster.Status.SetConditions(greenhousemetav1alpha1.NewCondition(
+				greenhousemetav1alpha1.ReadyCondition, metav1.ConditionTrue, "ClusterReady", "Cluster is ready"))
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster)).To(Succeed())
+
+			gaugeLabels := prometheus.Labels{
+				"care_instruction": careInstruction.Name,
+				"namespace":        careInstruction.Namespace,
+				"garden_namespace": careInstruction.Spec.GardenNamespace,
+				"shoot_name":       shoot.Name,
+			}
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+				g.Expect(careInstruction.Status.Shoots).To(HaveLen(1))
+				g.Expect(careInstruction.Status.Shoots[0].Status).To(Equal(v1alpha1.ShootStatusOnboarded))
+				g.Expect(promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(gaugeLabels))).To(Equal(1.0))
+				return true
+			}).Should(BeTrue(), "shoot should first be onboarded")
+
+			By("Degrading the shoot so it no longer matches the CEL expression")
+			Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shoot), shoot)).To(Succeed())
+			shoot.Status.LastOperation = &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateFailed}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+
+				g.Expect(careInstruction.Status.Shoots).To(HaveLen(1), "the shoot must be listed exactly once")
+				g.Expect(careInstruction.Status.Shoots[0].Name).To(Equal(shoot.Name))
+				g.Expect(careInstruction.Status.Shoots[0].Status).To(Equal(v1alpha1.ShootStatusExcluded))
+				g.Expect(careInstruction.Status.Shoots[0].Message).To(ContainSubstring("filtered out by CEL expression"))
+
+				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(1), "the owned cluster still exists")
+				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0))
+
+				shootsReconciledCondition := careInstruction.Status.GetConditionByType(v1alpha1.ShootsReconciledCondition)
+				g.Expect(shootsReconciledCondition).ToNot(BeNil())
+				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionTrue), "an excluded shoot must not block reconciliation")
+
+				g.Expect(promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(gaugeLabels))).To(Equal(0.0), "the onboarded gauge must follow the deduplicated status")
+
+				return true
+			}).Should(BeTrue(), "excluded shoot should replace the onboarded entry")
 		})
 	})
 
