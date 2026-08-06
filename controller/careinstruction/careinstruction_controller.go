@@ -567,14 +567,16 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 // reconcileManager recreates it on the next reconcile, re-applying all shoot-grafter config.
 func (r *CareInstructionReconciler) restartShootController(careInstruction *v1alpha1.CareInstruction) {
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
-	r.gardensMu.RLock()
+	r.gardensMu.Lock()
 	garden, exists := r.gardens[gardenKey]
-	r.gardensMu.RUnlock()
 	if !exists || garden.cancelFunc == nil {
+		r.gardensMu.Unlock()
 		return
 	}
 	r.Info("Restarting shoot controller", "careInstruction", careInstruction.Name)
 	garden.cancelFunc()
+	garden.mgr = nil
+	r.gardensMu.Unlock()
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
