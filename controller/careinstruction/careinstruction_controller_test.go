@@ -1036,9 +1036,7 @@ var _ = Describe("CareInstruction Controller", func() {
 			By("verifying the shoot controller restarts")
 			Eventually(func(g Gomega) {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
-				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
-				g.Expect(cond).NotTo(BeNil())
-				g.Expect(cond.IsTrue()).To(BeTrue())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(BeNumerically(">", 0))
 			}).Should(Succeed())
 		})
 	})
@@ -1427,9 +1425,7 @@ var _ = Describe("CareInstruction Controller", func() {
 			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
 			test.ReconcileObject(ci)
 			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
-			cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
-			Expect(cond).NotTo(BeNil())
-			Expect(cond.IsTrue()).To(BeTrue())
+			Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
 
 			By("updating the auth ConfigMap data and verifying the shoot controller restarts")
 			base = authCM.DeepCopy()
@@ -1438,9 +1434,7 @@ var _ = Describe("CareInstruction Controller", func() {
 
 			Eventually(func(g Gomega) {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
-				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
-				g.Expect(cond).NotTo(BeNil())
-				g.Expect(cond.IsTrue()).To(BeTrue())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(1))
 			}).Should(Succeed())
 
 			By("verifying a second CM data update also triggers a restart")
@@ -1450,9 +1444,7 @@ var _ = Describe("CareInstruction Controller", func() {
 
 			Eventually(func(g Gomega) {
 				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
-				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
-				g.Expect(cond).NotTo(BeNil())
-				g.Expect(cond.IsTrue()).To(BeTrue())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(2))
 			}).Should(Succeed())
 		})
 	})

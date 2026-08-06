@@ -184,6 +184,10 @@ spec:
                 description: FailedClusters is the number of clusters that failed
                   to be created by this CareInstruction.
                 type: integer
+              shootControllerRestartCount:
+                description: ShootControllerRestartCount is the number of times the
+                  shoot controller has been restarted.
+                type: integer
               shoots:
                 description: Shoots is a list of shoots targeted by this CareInstruction
                   with their detailed status.

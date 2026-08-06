@@ -388,12 +388,12 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 
 	// Handle CareInstruction reconcile annotation: restart the shoot controller so it re-applies all config.
 	if _, hasAnnotation := careInstruction.Annotations[v1alpha1.ReconcileAnnotation]; hasAnnotation {
-		r.restartShootController(careInstruction)
 		base := careInstruction.DeepCopy()
 		delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
 		if err := r.Patch(ctx, careInstruction, client.MergeFrom(base)); err != nil {
 			return err
 		}
+		r.restartShootController(careInstruction)
 	}
 
 	// List all shoots targeted by this CareInstruction
@@ -577,6 +577,7 @@ func (r *CareInstructionReconciler) restartShootController(careInstruction *v1al
 	garden.cancelFunc()
 	garden.mgr = nil
 	r.gardensMu.Unlock()
+	careInstruction.Status.ShootControllerRestartCount++
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
