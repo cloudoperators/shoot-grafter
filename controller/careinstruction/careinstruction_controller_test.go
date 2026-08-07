@@ -1430,6 +1430,17 @@ var _ = Describe("CareInstruction Controller", func() {
 				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
 			}).Should(Succeed())
 
+			By("adding an extra data key and verifying the shoot controller does not restart")
+			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(authCM), authCM)).To(Succeed())
+			base = authCM.DeepCopy()
+			authCM.Data["unrelated-key"] = "some-value"
+			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
+			test.ReconcileObject(ci)
+			Consistently(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
+			}).Should(Succeed())
+
 			By("updating the auth ConfigMap data and verifying the shoot controller restarts")
 			base = authCM.DeepCopy()
 			authCM.Data["config.yaml"] = "v2"

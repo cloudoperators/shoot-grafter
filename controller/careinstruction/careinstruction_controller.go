@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"sync"
 
 	"shoot-grafter/api/v1alpha1"
@@ -662,17 +661,11 @@ func (r *CareInstructionReconciler) ensureAuthConfigMapLabeled(ctx context.Conte
 	return r.Patch(ctx, &cm, client.MergeFrom(base))
 }
 
-// hashAuthConfigMap returns a SHA-256 hash of the auth ConfigMap's data, used to detect data-only changes.
+// hashAuthConfigMap returns a SHA-256 hash of the config.yaml key in the auth ConfigMap's data.
+// Only config.yaml is hashed so that changes to other keys do not trigger a controller restart.
 func hashAuthConfigMap(cm *corev1.ConfigMap) string {
-	keys := make([]string, 0, len(cm.Data))
-	for k := range cm.Data {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
 	h := sha256.New()
-	for _, k := range keys {
-		fmt.Fprintf(h, "%s=%s\n", k, cm.Data[k])
-	}
+	fmt.Fprint(h, cm.Data["config.yaml"])
 	return hex.EncodeToString(h.Sum(nil))
 }
 
