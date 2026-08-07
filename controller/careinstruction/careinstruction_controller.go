@@ -494,7 +494,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 
 		// Handle Cluster reconcile annotation: annotate the matching Shoot and remove the annotation.
 		if _, hasAnnotation := cluster.Annotations[v1alpha1.ReconcileAnnotation]; hasAnnotation {
-			gardenNamespace := garden.careInstructionSpec.GardenNamespace
+			gardenNamespace := careInstruction.Spec.GardenNamespace
 			if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
 				r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
 				retErr = err
