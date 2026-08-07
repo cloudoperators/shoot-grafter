@@ -5,8 +5,12 @@ package careinstruction
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 
 	"shoot-grafter/api/v1alpha1"
@@ -46,13 +50,13 @@ type CareInstructionReconciler struct {
 }
 
 type garden struct {
-	mgr                   ctrl.Manager                  // The manager for the garden cluster
-	gardenConfig          *rest.Config                  // The REST config for the garden cluster
-	gardenClient          *client.Client                // The client for the garden cluster
-	careInstructionSpec   *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
-	cancelFunc            context.CancelFunc            // Cancel function to stop the manager
-	stopChan              chan bool                     // Channel to know if the manager is stopped
-	authConfigMapRevision string                        // ResourceVersion of the last-seen auth ConfigMap
+	mgr                 ctrl.Manager                  // The manager for the garden cluster
+	gardenConfig        *rest.Config                  // The REST config for the garden cluster
+	gardenClient        *client.Client                // The client for the garden cluster
+	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
+	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
+	stopChan            chan bool                     // Channel to know if the manager is stopped
+	authConfigMapHash   string                        // SHA-256 hash of the last-seen auth ConfigMap data
 }
 
 type careInstructionContextKey struct{}
@@ -177,15 +181,15 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	_, gardenEntryExists := r.gardens[gardenKey]
 	r.gardensMu.RUnlock()
 
-	initialAuthCMRevision := ""
+	initialAuthCMHash := ""
 	if !gardenEntryExists && careInstruction.Spec.AuthenticationConfigMapName != "" {
-		// Seed the revision so the first reconcile does not trigger a spurious controller restart.
+		// Seed the hash so the first reconcile does not trigger an unnecessary controller restart.
 		var cm corev1.ConfigMap
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: careInstruction.Namespace,
 			Name:      careInstruction.Spec.AuthenticationConfigMapName,
 		}, &cm); err == nil {
-			initialAuthCMRevision = cm.ResourceVersion
+			initialAuthCMHash = hashAuthConfigMap(&cm)
 		}
 	}
 
@@ -196,13 +200,13 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 	if _, exists := r.gardens[gardenKey]; !exists {
 		r.gardens[gardenKey] = &garden{
-			mgr:                   nil,
-			gardenConfig:          nil,
-			gardenClient:          nil,
-			careInstructionSpec:   &careInstruction.Spec,
-			cancelFunc:            nil,
-			stopChan:              nil,
-			authConfigMapRevision: initialAuthCMRevision,
+			mgr:                 nil,
+			gardenConfig:        nil,
+			gardenClient:        nil,
+			careInstructionSpec: &careInstruction.Spec,
+			cancelFunc:          nil,
+			stopChan:            nil,
+			authConfigMapHash:   initialAuthCMHash,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -438,11 +442,13 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			Name:      careInstruction.Spec.AuthenticationConfigMapName,
 		}, &cm); err != nil && !apierrors.IsNotFound(err) {
 			return err
-		} else if err == nil && cm.ResourceVersion != garden.authConfigMapRevision {
-			r.gardensMu.Lock()
-			r.gardens[gardenKey].authConfigMapRevision = cm.ResourceVersion
-			r.gardensMu.Unlock()
-			r.restartShootController(careInstruction)
+		} else if err == nil {
+			if h := hashAuthConfigMap(&cm); h != garden.authConfigMapHash {
+				r.gardensMu.Lock()
+				r.gardens[gardenKey].authConfigMapHash = h
+				r.gardensMu.Unlock()
+				r.restartShootController(careInstruction)
+			}
 		}
 	}
 
@@ -645,6 +651,20 @@ func (r *CareInstructionReconciler) ensureAuthConfigMapLabeled(ctx context.Conte
 	}
 	cm.Labels[v1alpha1.AuthConfigMapLabel] = "true"
 	return r.Patch(ctx, &cm, client.MergeFrom(base))
+}
+
+// hashAuthConfigMap returns a SHA-256 hash of the auth ConfigMap's data, used to detect data-only changes.
+func hashAuthConfigMap(cm *corev1.ConfigMap) string {
+	keys := make([]string, 0, len(cm.Data))
+	for k := range cm.Data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s=%s\n", k, cm.Data[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // enqueueCareInstructionForGardenCluster - enqueues the CareInstruction for the given Garden Cluster.

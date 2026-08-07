@@ -1424,8 +1424,10 @@ var _ = Describe("CareInstruction Controller", func() {
 			authCM.Labels["some-label"] = "some-value"
 			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
 			test.ReconcileObject(ci)
-			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
-			Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
+			Consistently(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
+			}).Should(Succeed())
 
 			By("updating the auth ConfigMap data and verifying the shoot controller restarts")
 			base = authCM.DeepCopy()
