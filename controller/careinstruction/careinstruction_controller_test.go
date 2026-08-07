@@ -1417,6 +1417,7 @@ var _ = Describe("CareInstruction Controller", func() {
 			}).Should(Succeed())
 
 			By("updating only ConfigMap metadata and verifying the shoot controller does not restart")
+			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(authCM), authCM)).To(Succeed())
 			base := authCM.DeepCopy()
 			if authCM.Labels == nil {
 				authCM.Labels = map[string]string{}
