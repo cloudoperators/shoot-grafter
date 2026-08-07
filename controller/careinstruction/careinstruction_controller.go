@@ -443,7 +443,10 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		}, &cm); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		} else if err == nil {
-			if h := hashAuthConfigMap(&cm); h != garden.authConfigMapHash {
+			r.gardensMu.RLock()
+			prevHash := r.gardens[gardenKey].authConfigMapHash
+			r.gardensMu.RUnlock()
+			if h := hashAuthConfigMap(&cm); h != prevHash {
 				r.gardensMu.Lock()
 				r.gardens[gardenKey].authConfigMapHash = h
 				r.gardensMu.Unlock()
