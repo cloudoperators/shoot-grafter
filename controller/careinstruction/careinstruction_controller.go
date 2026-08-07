@@ -469,6 +469,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		existingClusterNames[cluster.Name] = true
 	}
 
+	var retErr error
 	for i := range clusters.Items {
 		cluster := &clusters.Items[i]
 		shootStatus := v1alpha1.ShootStatus{
@@ -493,15 +494,20 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 			gardenNamespace := garden.careInstructionSpec.GardenNamespace
 			if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
 				r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
+				retErr = err
 			} else {
 				r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
 				base := cluster.DeepCopy()
 				delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
 				if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
 					r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
+					retErr = err
 				}
 			}
 		}
+	}
+	if retErr != nil {
+		return retErr
 	}
 
 	effectiveShootCount := len(includedShoots)
