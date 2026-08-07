@@ -588,10 +588,13 @@ func (r *CareInstructionReconciler) restartShootController(careInstruction *v1al
 		return
 	}
 	r.Info("Restarting shoot controller", "careInstruction", careInstruction.Name)
+	alreadyStopped := garden.mgr == nil
 	garden.cancelFunc()
 	garden.mgr = nil
 	r.gardensMu.Unlock()
-	careInstruction.Status.ShootControllerRestartCount++
+	if !alreadyStopped {
+		careInstruction.Status.ShootControllerRestartCount++
+	}
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
