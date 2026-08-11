@@ -390,7 +390,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	r.gardensMu.RUnlock()
 
 	// Handle CareInstruction reconcile annotation: restart the shoot controller so it re-applies all config.
-	if _, hasAnnotation := careInstruction.Annotations[v1alpha1.ReconcileAnnotation]; hasAnnotation {
+	if careInstruction.Annotations[v1alpha1.ReconcileAnnotation] == "true" {
 		base := careInstruction.DeepCopy()
 		delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
 		if err := r.Patch(ctx, careInstruction, client.MergeFrom(base)); err != nil {
@@ -492,7 +492,7 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
 
 		// Handle Cluster reconcile annotation: annotate the matching Shoot and remove the annotation.
-		if _, hasAnnotation := cluster.Annotations[v1alpha1.ReconcileAnnotation]; hasAnnotation {
+		if cluster.Annotations[v1alpha1.ReconcileAnnotation] == "true" {
 			gardenNamespace := careInstruction.Spec.GardenNamespace
 			if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
 				r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
