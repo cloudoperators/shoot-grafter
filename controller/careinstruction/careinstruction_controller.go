@@ -189,6 +189,8 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			Name:      careInstruction.Spec.AuthenticationConfigMapName,
 		}, &cm); err == nil {
 			initialAuthCMHash = hashAuthConfigMap(&cm)
+		} else if !apierrors.IsNotFound(err) {
+			return err
 		}
 	}
 
