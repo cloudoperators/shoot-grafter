@@ -356,3 +356,17 @@ func (r *ShootController) RequestClusterDeletion(ctx context.Context, existingCl
 func GenerateName(gardenClusterName string) string {
 	return "shoot-controller-" + gardenClusterName
 }
+
+// AnnotateShootForReconcile sets gardener.cloud/operation: reconcile on the named Shoot.
+func AnnotateShootForReconcile(ctx context.Context, gardenClient client.Client, namespace, name string) error {
+	var s gardenerv1beta1.Shoot
+	if err := gardenClient.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &s); err != nil {
+		return fmt.Errorf("failed to get Shoot %s/%s: %w", namespace, name, err)
+	}
+	base := s.DeepCopy()
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations["gardener.cloud/operation"] = "reconcile"
+	return gardenClient.Patch(ctx, &s, client.MergeFrom(base))
+}

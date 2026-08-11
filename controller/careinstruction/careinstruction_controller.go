@@ -5,7 +5,10 @@ package careinstruction
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -52,6 +55,7 @@ type garden struct {
 	careInstructionSpec *v1alpha1.CareInstructionSpec // The CareInstruction object for the garden cluster
 	cancelFunc          context.CancelFunc            // Cancel function to stop the manager
 	stopChan            chan bool                     // Channel to know if the manager is stopped
+	authConfigMapHash   string                        // SHA-256 hash of the last-seen auth ConfigMap data
 }
 
 type careInstructionContextKey struct{}
@@ -172,7 +176,25 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	// Use namespace-qualified key to prevent collisions between CareInstructions with the same name in different namespaces
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
 
-	// Initialize gardens map if needed (with write lock)
+	r.gardensMu.RLock()
+	_, gardenEntryExists := r.gardens[gardenKey]
+	r.gardensMu.RUnlock()
+
+	initialAuthCMHash := ""
+	if !gardenEntryExists && careInstruction.Spec.AuthenticationConfigMapName != "" {
+		// Seed the hash so the first reconcile does not trigger an unnecessary controller restart.
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: careInstruction.Namespace,
+			Name:      careInstruction.Spec.AuthenticationConfigMapName,
+		}, &cm); err == nil {
+			initialAuthCMHash = hashAuthConfigMap(&cm)
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Initialize gardens map if needed.
 	r.gardensMu.Lock()
 	if r.gardens == nil {
 		r.gardens = make(map[string]*garden)
@@ -185,6 +207,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 			careInstructionSpec: &careInstruction.Spec,
 			cancelFunc:          nil,
 			stopChan:            nil,
+			authConfigMapHash:   initialAuthCMHash,
 		}
 	}
 	r.gardensMu.Unlock()
@@ -359,12 +382,24 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	careInstruction.Status.CreatedClusters = 0
 	careInstruction.Status.FailedClusters = 0
 	careInstruction.Status.Shoots = []v1alpha1.ShootStatus{}
+	defer UpdateCareInstructionMetrics(careInstruction)
 
 	// Get garden client (with read lock)
 	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
 	r.gardensMu.RLock()
-	gardenClient := r.gardens[gardenKey].gardenClient
+	garden := r.gardens[gardenKey]
+	gardenClient := garden.gardenClient
 	r.gardensMu.RUnlock()
+
+	// Handle CareInstruction reconcile annotation: restart the shoot controller so it re-applies all config.
+	if careInstruction.Annotations[v1alpha1.ReconcileAnnotation] == "true" {
+		base := careInstruction.DeepCopy()
+		delete(careInstruction.Annotations, v1alpha1.ReconcileAnnotation)
+		if err := r.Patch(ctx, careInstruction, client.MergeFrom(base)); err != nil {
+			return err
+		}
+		r.restartShootController(careInstruction)
+	}
 
 	// List all shoots targeted by this CareInstruction
 	shoots, err := careInstruction.ListShoots(ctx, *gardenClient)
@@ -400,7 +435,26 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		}
 	}
 
-	defer UpdateCareInstructionMetrics(careInstruction)
+	// Handle auth ConfigMap change: restart the shoot controller when CM data changes.
+	if careInstruction.Spec.AuthenticationConfigMapName != "" {
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: careInstruction.Namespace,
+			Name:      careInstruction.Spec.AuthenticationConfigMapName,
+		}, &cm); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		} else if err == nil {
+			r.gardensMu.RLock()
+			prevHash := r.gardens[gardenKey].authConfigMapHash
+			r.gardensMu.RUnlock()
+			if h := hashAuthConfigMap(&cm); h != prevHash {
+				r.gardensMu.Lock()
+				r.gardens[gardenKey].authConfigMapHash = h
+				r.gardensMu.Unlock()
+				r.restartShootController(careInstruction)
+			}
+		}
+	}
 
 	// List all clusters created by this CareInstruction
 	clusters, err := careInstruction.ListClusters(ctx, r.Client)
@@ -419,7 +473,9 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		existingClusterNames[cluster.Name] = true
 	}
 
-	for _, cluster := range clusters.Items {
+	var retErr error
+	for i := range clusters.Items {
+		cluster := &clusters.Items[i]
 		shootStatus := v1alpha1.ShootStatus{
 			Name: cluster.Name,
 		}
@@ -436,6 +492,26 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		}
 
 		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
+
+		// Handle Cluster reconcile annotation: annotate the matching Shoot and remove the annotation.
+		if cluster.Annotations[v1alpha1.ReconcileAnnotation] == "true" {
+			gardenNamespace := careInstruction.Spec.GardenNamespace
+			if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
+				r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
+				retErr = err
+			} else {
+				r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
+				base := cluster.DeepCopy()
+				delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
+				if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
+					r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
+					retErr = err
+				}
+			}
+		}
+	}
+	if retErr != nil {
+		return retErr
 	}
 
 	effectiveShootCount := len(includedShoots)
@@ -503,6 +579,26 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	return nil
 }
 
+// restartShootController cancels the garden manager for the given CareInstruction so that
+// reconcileManager recreates it on the next reconcile, re-applying all shoot-grafter config.
+func (r *CareInstructionReconciler) restartShootController(careInstruction *v1alpha1.CareInstruction) {
+	gardenKey := careInstruction.Namespace + "/" + careInstruction.Name
+	r.gardensMu.Lock()
+	garden, exists := r.gardens[gardenKey]
+	if !exists || garden.cancelFunc == nil {
+		r.gardensMu.Unlock()
+		return
+	}
+	r.Info("Restarting shoot controller", "careInstruction", careInstruction.Name)
+	alreadyStopped := garden.mgr == nil
+	garden.cancelFunc()
+	garden.mgr = nil
+	r.gardensMu.Unlock()
+	if !alreadyStopped {
+		careInstruction.Status.ShootControllerRestartCount++
+	}
+}
+
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
 func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Cleaning up CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
@@ -568,6 +664,14 @@ func (r *CareInstructionReconciler) ensureAuthConfigMapLabeled(ctx context.Conte
 	}
 	cm.Labels[v1alpha1.AuthConfigMapLabel] = "true"
 	return r.Patch(ctx, &cm, client.MergeFrom(base))
+}
+
+// hashAuthConfigMap returns a SHA-256 hash of the config.yaml key in the auth ConfigMap's data.
+// Only config.yaml is hashed so that changes to other keys do not trigger a controller restart.
+func hashAuthConfigMap(cm *corev1.ConfigMap) string {
+	h := sha256.New()
+	fmt.Fprint(h, cm.Data["config.yaml"])
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // enqueueCareInstructionForGardenCluster - enqueues the CareInstruction for the given Garden Cluster.

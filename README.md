@@ -216,6 +216,17 @@ spec:
 
 *Note: Either `gardenClusterName` or `gardenClusterKubeConfigSecretName` must be provided (priority: kubeconfig secret > cluster name)
 
+### Triggering Reconciliation
+
+The annotation `shoot-grafter.cloudoperators.dev/reconcile: "true"` can be set on a **CareInstruction** or a **Greenhouse Cluster** to trigger reconciliation on demand.
+
+| Target | Effect |
+|--------|--------|
+| `CareInstruction` | Restarts the shoot controller for that CareInstruction, causing shoot-grafter to re-apply its config (OIDC, RBAC, labels) to all matching Shoots |
+| `Greenhouse Cluster` | Sets `gardener.cloud/operation: reconcile` on the matching Shoot in the Garden cluster, triggering Gardener's own reconciliation |
+
+The annotation is removed from the resource after processing.
+
 ### CareInstruction Status
 
 The CareInstruction status provides real-time information about the onboarding process:

@@ -39,6 +39,9 @@ const (
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
 	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/auth-configmap"
 
+	// ReconcileAnnotation can be set on a Cluster or CareInstruction to trigger reconciliation of the matching Shoot(s).
+	ReconcileAnnotation = "shoot-grafter.cloudoperators.dev/reconcile"
+
 	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
 	ShootStatusOnboarded = "Onboarded"
 
@@ -132,6 +135,9 @@ type CareInstructionStatus struct {
 
 	// FailedClusters is the number of clusters that failed to be created by this CareInstruction.
 	FailedClusters int `json:"failedClusters,omitempty"`
+
+	// ShootControllerRestartCount is the number of times the shoot controller has been restarted.
+	ShootControllerRestartCount int `json:"shootControllerRestartCount,omitempty"`
 }
 
 // +kubebuilder:object:root=true
