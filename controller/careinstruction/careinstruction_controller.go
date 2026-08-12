@@ -413,23 +413,16 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 	}
 
 	var includedShoots []gardenerv1beta1.Shoot
+	excludedShoots := make(map[string]string)
 	for _, shoot := range shoots.Items {
 		matches, err := careInstruction.MatchesCELFilter(&shoot)
 		switch {
 		case err != nil:
 			r.Info("CEL evaluation failed", "shoot", shoot.Name, "error", err.Error())
-			careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, v1alpha1.ShootStatus{
-				Name:    shoot.Name,
-				Status:  v1alpha1.ShootStatusExcluded,
-				Message: "CEL evaluation failed: " + err.Error(),
-			})
+			excludedShoots[shoot.Name] = "CEL evaluation failed: " + err.Error()
 		case !matches:
 			r.Info("Shoot filtered out by CEL expression", "shoot", shoot.Name)
-			careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, v1alpha1.ShootStatus{
-				Name:    shoot.Name,
-				Status:  v1alpha1.ShootStatusExcluded,
-				Message: "filtered out by CEL expression",
-			})
+			excludedShoots[shoot.Name] = "filtered out by CEL expression"
 		default:
 			includedShoots = append(includedShoots, shoot)
 		}
@@ -473,52 +466,42 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 		existingClusterNames[cluster.Name] = true
 	}
 
+	matchedOwnedCount := 0
+	for _, shoot := range includedShoots {
+		if existingClusterNames[shoot.Name] {
+			matchedOwnedCount++
+		}
+	}
+
+	// Handle Cluster reconcile annotation: annotate the matching Shoot and remove the annotation.
 	var retErr error
 	for i := range clusters.Items {
 		cluster := &clusters.Items[i]
-		shootStatus := v1alpha1.ShootStatus{
-			Name: cluster.Name,
+		if cluster.Annotations[v1alpha1.ReconcileAnnotation] != "true" {
+			continue
 		}
-
-		if cluster.Status.IsReadyTrue() {
-			shootStatus.Status = v1alpha1.ShootStatusOnboarded
-		} else {
-			shootStatus.Status = v1alpha1.ShootStatusFailed
-			readyCondition := cluster.Status.GetConditionByType(greenhousemetav1alpha1.ReadyCondition)
-			if readyCondition != nil && readyCondition.Message != "" {
-				shootStatus.Message = readyCondition.Message
-			}
-			careInstruction.Status.FailedClusters++
+		gardenNamespace := careInstruction.Spec.GardenNamespace
+		if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
+			r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
+			retErr = err
+			continue
 		}
-
-		careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
-
-		// Handle Cluster reconcile annotation: annotate the matching Shoot and remove the annotation.
-		if cluster.Annotations[v1alpha1.ReconcileAnnotation] == "true" {
-			gardenNamespace := careInstruction.Spec.GardenNamespace
-			if err := shoot.AnnotateShootForReconcile(ctx, *gardenClient, gardenNamespace, cluster.Name); err != nil {
-				r.Error(err, "failed to annotate Shoot for reconciliation", "shoot", cluster.Name)
-				retErr = err
-			} else {
-				r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
-				base := cluster.DeepCopy()
-				delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
-				if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
-					r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
-					retErr = err
-				}
-			}
+		r.Info("Annotated Shoot for reconciliation via Cluster annotation", "shoot", cluster.Name)
+		base := cluster.DeepCopy()
+		delete(cluster.Annotations, v1alpha1.ReconcileAnnotation)
+		if err := r.Patch(ctx, cluster, client.MergeFrom(base)); err != nil {
+			r.Error(err, "failed to remove reconcile annotation from Cluster", "cluster", cluster.Name)
+			retErr = err
 		}
 	}
-	if retErr != nil {
-		return retErr
-	}
 
-	effectiveShootCount := len(includedShoots)
-	if effectiveShootCount != careInstruction.Status.CreatedClusters {
+	var conflicts map[string]conflictInfo
+	countsMatch := len(includedShoots) == matchedOwnedCount
+	if !countsMatch {
+		conflicts = make(map[string]conflictInfo)
 		r.Info("Shoot count does not match cluster count, checking for ownership conflicts",
-			"effectiveShoots", effectiveShootCount,
-			"createdClusters", careInstruction.Status.CreatedClusters)
+			"effectiveShoots", len(includedShoots),
+			"ownedClusters", matchedOwnedCount)
 
 		// Only check ownership conflicts for shoots that pass all filters.
 		// Filtered-out shoots should not have new clusters created.
@@ -538,26 +521,26 @@ func (r *CareInstructionReconciler) reconcileShootsNClusters(ctx context.Context
 						"managedBy", ownerLabel,
 						"attemptedBy", careInstruction.Name)
 
-					shootStatus := v1alpha1.ShootStatus{
-						Name:    shoot.Name,
-						Message: "Cluster managed by different CareInstruction: " + ownerLabel,
+					conflicts[shoot.Name] = conflictInfo{
+						owner: ownerLabel,
+						ready: existingCluster.Status.IsReadyTrue(),
 					}
-
-					if existingCluster.Status.IsReadyTrue() {
-						shootStatus.Status = v1alpha1.ShootStatusOnboarded
-					} else {
-						shootStatus.Status = v1alpha1.ShootStatusFailed
-						careInstruction.Status.FailedClusters++
-					}
-
-					careInstruction.Status.Shoots = append(careInstruction.Status.Shoots, shootStatus)
 				}
 			} else if !apierrors.IsNotFound(err) {
 				// Some other error occurred
 				return err
 			}
 		}
+	}
 
+	careInstruction.Status.Shoots, careInstruction.Status.FailedClusters = buildShootStatuses(excludedShoots, clusters.Items, conflicts)
+
+	// The status is built first so an annotation failure still reports the current shoots.
+	if retErr != nil {
+		return retErr
+	}
+
+	if !countsMatch {
 		err := errors.New("shoot count and cluster count do not match")
 		return err
 	}
