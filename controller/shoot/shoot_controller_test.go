@@ -1591,6 +1591,9 @@ jwt:
 				g.Expect(authConfig.JWT[0].ClaimMappings.Username.Prefix).NotTo(BeNil())
 				g.Expect(*authConfig.JWT[0].ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
 
+				// Verify CM carries the ownership label
+				g.Expect(authConfigMap.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, "test-careinstruction-oidc"))
+
 				return true
 			}).Should(BeTrue(), "should eventually create OIDC AuthenticationConfiguration ConfigMap")
 
@@ -1608,6 +1611,9 @@ jwt:
 				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer).NotTo(BeNil())
 				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication).NotTo(BeNil())
 				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication.ConfigMapName).To(Equal("test-careinstruction-oidc-greenhouse-auth"))
+
+				// Verify Shoot carries the auth-configured-by label
+				g.Expect(updatedShoot.Labels).To(HaveKeyWithValue(v1alpha1.ShootAuthConfiguredByLabel, "test-careinstruction-oidc"))
 
 				return true
 			}).Should(BeTrue(), "should eventually update shoot spec with ConfigMap reference")
@@ -1679,7 +1685,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
 
-			// Eventually verify the auth ConfigMap was updated with correct greenhouse config
+			// Eventually verify the auth ConfigMap was overwritten with Greenhouse content
 			Eventually(func(g Gomega) bool {
 				authConfigMap := &corev1.ConfigMap{}
 				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
@@ -1695,7 +1701,7 @@ jwt:
 				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// Should have one issuer (greenhouse, updated)
+				// Old issuer must be gone; only the Greenhouse issuer remains
 				g.Expect(authConfig.JWT).To(HaveLen(1))
 				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse.test.example.com"))
 				g.Expect(authConfig.JWT[0].Issuer.Audiences).To(ConsistOf("greenhouse"))
@@ -1704,11 +1710,12 @@ jwt:
 				g.Expect(*authConfig.JWT[0].ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
 
 				return true
-			}).Should(BeTrue(), "should eventually update existing OIDC configuration")
+			}).Should(BeTrue(), "should eventually overwrite existing OIDC configuration with Greenhouse content")
 		})
 
-		It("should preserve other issuers when adding greenhouse issuer", func() {
-			// Create a shoot with existing OIDC config containing other issuers
+		It("should overwrite existing garden CM content — other issuers are not preserved", func() {
+			// shoot-grafter is the sole owner of the garden CM; it overwrites content verbatim
+			// from the Greenhouse CM. Any existing issuers in the garden CM are replaced.
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-shoot-oidc-preserve",
@@ -1739,7 +1746,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
 
-			// Create existing auth ConfigMap with other issuers
+			// Create existing auth ConfigMap with other issuers — these must be overwritten, not preserved
 			existingAuthCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-shoot-oidc-preserve-auth",
@@ -1780,7 +1787,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
 
-			// Eventually verify the auth ConfigMap was updated with greenhouse issuer added
+			// Eventually verify the garden CM was overwritten with only the Greenhouse issuer
 			Eventually(func(g Gomega) bool {
 				authConfigMap := &corev1.ConfigMap{}
 				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
@@ -1791,50 +1798,21 @@ jwt:
 					return false
 				}
 
-				// Parse and verify the configuration
 				var authConfig apiserverv1beta1.AuthenticationConfiguration
 				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// Should have three issuers now (two original + greenhouse)
-				g.Expect(authConfig.JWT).To(HaveLen(3))
-
-				// Verify other issuers are preserved
-				foundIssuer1 := false
-				foundIssuer2 := false
-				foundGreenhouse := false
-
-				for _, issuer := range authConfig.JWT {
-					switch issuer.Issuer.URL {
-					case "https://other-issuer1.example.com":
-						foundIssuer1 = true
-						g.Expect(issuer.Issuer.Audiences).To(ConsistOf("issuer1"))
-					case "https://other-issuer2.example.com":
-						foundIssuer2 = true
-						g.Expect(issuer.Issuer.Audiences).To(ConsistOf("issuer2"))
-					case "https://greenhouse.test.example.com":
-						foundGreenhouse = true
-						g.Expect(issuer.Issuer.Audiences).To(ConsistOf("greenhouse"))
-						g.Expect(issuer.ClaimMappings.Username.Claim).To(Equal("sub"))
-						g.Expect(issuer.ClaimMappings.Username.Prefix).NotTo(BeNil())
-						g.Expect(*issuer.ClaimMappings.Username.Prefix).To(Equal("greenhouse:"))
-					}
-				}
-
-				g.Expect(foundIssuer1).To(BeTrue(), "should preserve issuer1")
-				g.Expect(foundIssuer2).To(BeTrue(), "should preserve issuer2")
-				g.Expect(foundGreenhouse).To(BeTrue(), "should add greenhouse issuer")
+				// Only the Greenhouse issuer must remain — the old issuers are gone
+				g.Expect(authConfig.JWT).To(HaveLen(1), "only Greenhouse issuer should remain after overwrite")
+				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse.test.example.com"))
 
 				return true
-			}).Should(BeTrue(), "should eventually add greenhouse issuer while preserving others")
+			}).Should(BeTrue(), "should eventually overwrite garden CM with only Greenhouse content")
 		})
 
-		It("should preserve all user issuers and add greenhouse issuer in real-world complex ConfigMap scenario", func() {
-			// This test reproduces a real-world scenario where:
-			// - User creates a ConfigMap with 3 issuers (no greenhouse issuer)
-			// - shoot-grafter should ADD the greenhouse issuer
-			// - All 3 original user issuers must be preserved
-			// - Final result: 4 issuers total (3 original + 1 greenhouse)
+		It("should overwrite all existing content in a complex pre-existing garden CM", func() {
+			// shoot-grafter is the sole owner — even a CM with many user-managed issuers is
+			// replaced entirely with the Greenhouse content.
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-shoot-complex",
@@ -1865,7 +1843,6 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
 
-			// Create existing auth ConfigMap with only 3 user-defined issuers (NO greenhouse issuer yet)
 			existingAuthCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "authentication-config-complex",
@@ -1913,7 +1890,6 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, existingAuthCM)).To(Succeed(), "should create existing complex auth ConfigMap with 3 user issuers")
 
-			// Create CA ConfigMap
 			cm := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-shoot-complex.ca-cluster",
@@ -1925,7 +1901,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
 
-			// Eventually verify: 3 original user issuers + 1 greenhouse issuer = 4 total
+			// After reconciliation only the Greenhouse issuer must remain — all 3 user issuers are gone
 			Eventually(func(g Gomega) bool {
 				authConfigMap := &corev1.ConfigMap{}
 				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{
@@ -1936,44 +1912,16 @@ jwt:
 					return false
 				}
 
-				// Parse and verify the configuration
 				var authConfig apiserverv1beta1.AuthenticationConfiguration
 				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// Should have 4 issuers total: 3 original user issuers + 1 greenhouse issuer added by shoot-grafter
-				g.Expect(authConfig.JWT).To(HaveLen(4), "should have 4 issuers: 3 original + 1 greenhouse")
-
-				// Track which issuers we found
-				foundIssuerURLs := make(map[string]bool)
-				for _, jwt := range authConfig.JWT {
-					foundIssuerURLs[jwt.Issuer.URL] = true
-				}
-
-				// Verify all 3 original user issuers are preserved
-				g.Expect(foundIssuerURLs).To(HaveKey("https://issuer1.example.com"), "should preserve issuer1")
-				g.Expect(foundIssuerURLs).To(HaveKey("https://issuer2.example.com/v1/identity/oidc"), "should preserve issuer2")
-				g.Expect(foundIssuerURLs).To(HaveKey("https://issuer3.example.com"), "should preserve issuer3")
-
-				// Verify greenhouse issuer was added by shoot-grafter
-				g.Expect(foundIssuerURLs).To(HaveKey("https://greenhouse.test.example.com"), "should add greenhouse issuer from greenhouse-auth-config")
-
-				// Verify greenhouse issuer has correct configuration
-				var greenhouseIssuer *apiserverv1beta1.JWTAuthenticator
-				for i := range authConfig.JWT {
-					if authConfig.JWT[i].Issuer.URL == "https://greenhouse.test.example.com" {
-						greenhouseIssuer = &authConfig.JWT[i]
-						break
-					}
-				}
-				g.Expect(greenhouseIssuer).NotTo(BeNil(), "should find greenhouse issuer")
-				g.Expect(greenhouseIssuer.Issuer.Audiences).To(ConsistOf("greenhouse"), "greenhouse issuer should have correct audience")
-				g.Expect(greenhouseIssuer.ClaimMappings.Username.Claim).To(Equal("sub"), "greenhouse issuer should have correct username claim")
-				g.Expect(greenhouseIssuer.ClaimMappings.Username.Prefix).NotTo(BeNil(), "greenhouse issuer should have username prefix")
-				g.Expect(*greenhouseIssuer.ClaimMappings.Username.Prefix).To(Equal("greenhouse:"), "greenhouse issuer should have correct prefix")
+				g.Expect(authConfig.JWT).To(HaveLen(1), "only Greenhouse issuer should remain after overwrite")
+				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse.test.example.com"))
+				g.Expect(authConfig.JWT[0].Issuer.Audiences).To(ConsistOf("greenhouse"))
 
 				return true
-			}).Should(BeTrue(), "should eventually have 4 issuers: 3 original user issuers preserved + 1 greenhouse issuer added")
+			}).Should(BeTrue(), "should eventually overwrite complex garden CM with only Greenhouse content")
 
 			// Verify shoot spec references the correct ConfigMap
 			Eventually(func(g Gomega) bool {

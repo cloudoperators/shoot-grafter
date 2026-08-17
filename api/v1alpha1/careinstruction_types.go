@@ -50,6 +50,10 @@ const (
 
 	// ShootStatusExcluded indicates the shoot was excluded by the ShootSelector filter criteria.
 	ShootStatusExcluded = "Excluded"
+
+	// ShootAuthConfiguredByLabel is the label placed on a Shoot to identify which CareInstruction
+	// configured its OIDC authentication.
+	ShootAuthConfiguredByLabel = "shoot-grafter.cloudoperators.dev/auth-configured-by"
 )
 
 // ShootSelector combines label-based and CEL expression-based filtering for shoots.

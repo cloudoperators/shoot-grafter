@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"shoot-grafter/api/v1alpha1"
+	"shoot-grafter/internal/clientutil"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
@@ -84,6 +86,14 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(r.Name).
 		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueShoots),
+			builder.WithPredicates(
+				clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel),
+				clientutil.PredicateConfigMapDataChanged(),
+			),
+		).
 		Complete(r)
 }
 
@@ -105,6 +115,20 @@ func (r *ShootController) matchesCEL(shoot *gardenerv1beta1.Shoot) bool {
 		return false
 	}
 	return matches
+}
+
+// enqueueShoots maps a ConfigMap change to reconcile requests for all Shoots in the same namespace.
+func (r *ShootController) enqueueShoots(ctx context.Context, obj client.Object) []ctrl.Request {
+	var shoots gardenerv1beta1.ShootList
+	if err := r.GardenClient.List(ctx, &shoots, client.InNamespace(obj.GetNamespace())); err != nil {
+		r.Error(err, "failed to list Shoots for ConfigMap watch")
+		return nil
+	}
+	reqs := make([]ctrl.Request, 0, len(shoots.Items))
+	for _, s := range shoots.Items {
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKey{Name: s.Name, Namespace: s.Namespace}})
+	}
+	return reqs
 }
 
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -311,7 +335,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
 		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
-		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
+		if err := r.ConfigureOIDCAuthentication(ctx, &shoot); err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
 				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
