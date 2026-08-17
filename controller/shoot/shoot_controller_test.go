@@ -1713,7 +1713,7 @@ jwt:
 			}).Should(BeTrue(), "should eventually overwrite existing OIDC configuration with Greenhouse content")
 		})
 
-		It("should overwrite existing garden CM content — other issuers are not preserved", func() {
+		It("should overwrite existing garden CM content - other issuers are not preserved", func() {
 			// shoot-grafter is the sole owner of the garden CM; it overwrites content verbatim
 			// from the Greenhouse CM. Any existing issuers in the garden CM are replaced.
 			shoot := &gardenerv1beta1.Shoot{
@@ -1746,7 +1746,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
 
-			// Create existing auth ConfigMap with other issuers — these must be overwritten, not preserved
+			// Create existing auth ConfigMap with other issuers - these must be overwritten, not preserved
 			existingAuthCM := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-shoot-oidc-preserve-auth",
@@ -1802,7 +1802,7 @@ jwt:
 				err = yaml.Unmarshal([]byte(authConfigMap.Data["config.yaml"]), &authConfig)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// Only the Greenhouse issuer must remain — the old issuers are gone
+				// Only the Greenhouse issuer must remain - the old issuers are gone
 				g.Expect(authConfig.JWT).To(HaveLen(1), "only Greenhouse issuer should remain after overwrite")
 				g.Expect(authConfig.JWT[0].Issuer.URL).To(Equal("https://greenhouse.test.example.com"))
 
@@ -1811,7 +1811,7 @@ jwt:
 		})
 
 		It("should overwrite all existing content in a complex pre-existing garden CM", func() {
-			// shoot-grafter is the sole owner — even a CM with many user-managed issuers is
+			// shoot-grafter is the sole owner - even a CM with many user-managed issuers is
 			// replaced entirely with the Greenhouse content.
 			shoot := &gardenerv1beta1.Shoot{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1901,7 +1901,7 @@ jwt:
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create CA ConfigMap resource")
 
-			// After reconciliation only the Greenhouse issuer must remain — all 3 user issuers are gone
+			// After reconciliation only the Greenhouse issuer must remain - all 3 user issuers are gone
 			Eventually(func(g Gomega) bool {
 				authConfigMap := &corev1.ConfigMap{}
 				err := test.GardenK8sClient.Get(test.Ctx, client.ObjectKey{

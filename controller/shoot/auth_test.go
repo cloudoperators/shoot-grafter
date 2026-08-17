@@ -167,7 +167,7 @@ jwt:
 			Namespace: "default", Name: "existing-auth",
 		}, &gardenCM)).To(Succeed())
 
-		// Content must be exactly the Greenhouse content — old issuer must be gone
+		// Content must be exactly the Greenhouse content - old issuer must be gone
 		Expect(gardenCM.Data["config.yaml"]).To(Equal(authYAML))
 		Expect(gardenCM.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, "my-ci"))
 	})
@@ -222,5 +222,74 @@ jwt:
 			Namespace: "default", Name: "my-ci-greenhouse-auth",
 		}, &result)).To(Succeed())
 		Expect(result.Data["config.yaml"]).To(Equal(updatedYAML))
+	})
+
+	It("updates the garden CM content when the CI's AuthenticationConfigMapName is changed to a different Greenhouse CM", func() {
+		// Scenario: CI.Spec.AuthenticationConfigMapName was "greenhouse-auth" and is now
+		// changed to "greenhouse-auth-v2". The garden CM name is unchanged (<ci>-greenhouse-auth),
+		// but its content must reflect the new Greenhouse CM.
+		newGreenhouseCM := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "greenhouse-auth-v2",
+				Namespace: "default",
+			},
+			Data: map[string]string{
+				"config.yaml": `apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://greenhouse-v2.example.com
+    audiences:
+    - greenhouse-v2
+  claimMappings:
+    username:
+      claim: sub
+      prefix: 'v2:'
+`,
+			},
+		}
+		gardenCM := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ci-greenhouse-auth",
+				Namespace: "default",
+				Labels:    map[string]string{v1alpha1.CareInstructionLabel: "my-ci"},
+			},
+			Data: map[string]string{"config.yaml": authYAML},
+		}
+		shootObj := &gardenerv1beta1.Shoot{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-shoot", Namespace: "default"},
+			Spec: gardenerv1beta1.ShootSpec{
+				Kubernetes: gardenerv1beta1.Kubernetes{
+					KubeAPIServer: &gardenerv1beta1.KubeAPIServerConfig{
+						StructuredAuthentication: &gardenerv1beta1.StructuredAuthentication{
+							ConfigMapName: "my-ci-greenhouse-auth",
+						},
+					},
+				},
+			},
+		}
+
+		s := authScheme()
+		ctrl := &shoot.ShootController{
+			GreenhouseClient: fake.NewClientBuilder().WithScheme(s).WithObjects(newGreenhouseCM).Build(),
+			GardenClient:     fake.NewClientBuilder().WithScheme(s).WithObjects(gardenCM, shootObj).Build(),
+			Logger:           logr.Discard(),
+			CareInstruction: &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-ci", Namespace: "default"},
+				Spec: v1alpha1.CareInstructionSpec{
+					// CI now references the new Greenhouse CM
+					AuthenticationConfigMapName: "greenhouse-auth-v2",
+				},
+			},
+		}
+
+		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shootObj)).To(Succeed())
+
+		var result corev1.ConfigMap
+		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
+			Namespace: "default", Name: "my-ci-greenhouse-auth",
+		}, &result)).To(Succeed())
+		// Garden CM name is unchanged; content reflects the new Greenhouse CM
+		Expect(result.Data["config.yaml"]).To(Equal(newGreenhouseCM.Data["config.yaml"]))
 	})
 })
