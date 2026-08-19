@@ -131,13 +131,13 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 		return nil // Spec change triggers reconciliation automatically
 	}
 
-	// Trigger Shoot reconciliation if ConfigMap content was updated.
+	// Trigger Shoot reconciliation if ConfigMap was created or updated.
 	// Reference: https://gardener.cloud/docs/gardener/shoot-operations/shoot_operations/#immediate-reconciliation
-	if configMapResult == controllerutil.OperationResultUpdated {
+	if configMapResult != controllerutil.OperationResultNone {
 		if err := AnnotateShootForReconcile(ctx, r.GardenClient, shoot.Namespace, shoot.Name); err != nil {
 			return fmt.Errorf("failed to annotate Shoot for reconciliation: %w", err)
 		}
-		r.Info("Annotated Shoot for reconciliation due to ConfigMap content update",
+		r.Info("Annotated Shoot for reconciliation due to ConfigMap change",
 			"shoot", shoot.Name,
 			"configMap", configMapName)
 	}

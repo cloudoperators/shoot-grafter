@@ -368,7 +368,7 @@ spec:
     labelSelector:
       matchLabels:
         enabled-oidc: "true"
-  authenticationConfigMapRef: greenhouse-oidc-config
+  authenticationConfigMapName: greenhouse-oidc-config
   propagateLabels:
     - metadata.greenhouse.sap/environment
 ```
@@ -406,7 +406,7 @@ When `spec.authenticationConfigMapName` is configured in a CareInstruction, shoo
 1. **Initial Setup**: When a Shoot is first onboarded, shoot-grafter creates an AuthenticationConfiguration ConfigMap in the Garden cluster and updates the Shoot's spec to reference it.
 
 2. **Configuration Updates**: When the Greenhouse AuthenticationConfiguration ConfigMap is updated with new OIDC settings:
-   - shoot-grafter merges the updated configuration with any existing Garden cluster configuration
+   - shoot-grafter overwrites the Garden cluster ConfigMap verbatim with the Greenhouse content — shoot-grafter is the sole owner of that ConfigMap's data
    - If the Shoot spec already references the correct ConfigMap (no spec change needed), shoot-grafter automatically triggers a Shoot reconciliation by annotating it with `gardener.cloud/operation: reconcile` to apply the changes immediately without waiting for the Shoot's maintenance window
    - See the [Gardener documentation on immediate reconciliation](https://gardener.cloud/docs/gardener/shoot-operations/shoot_operations/#immediate-reconciliation) for more details
 
