@@ -82,10 +82,7 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 		}
 		gardenConfigMap.Annotations[authConfigMapManagedBy] = "shoot-grafter - do not edit by hand, this is maintained by automation"
 
-		if gardenConfigMap.Data == nil {
-			gardenConfigMap.Data = make(map[string]string)
-		}
-		gardenConfigMap.Data[authConfigMapKey] = authContent
+		gardenConfigMap.Data = map[string]string{authConfigMapKey: authContent}
 		return nil
 	})
 	if err != nil {
