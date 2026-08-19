@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	authConfigMapKey       = "config.yaml"
-	authConfigMapManagedBy = "shoot-grafter.cloudoperators.dev/managed-by"
+	authConfigMapKey                 = "config.yaml"
+	authConfigMapManagedByAnnotation = "shoot-grafter.cloudoperators.dev/managed-by"
 )
 
 // ConfigureOIDCAuthentication configures OIDC authentication for the Shoot by:
@@ -80,7 +80,7 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 		if gardenConfigMap.Annotations == nil {
 			gardenConfigMap.Annotations = make(map[string]string)
 		}
-		gardenConfigMap.Annotations[authConfigMapManagedBy] = "shoot-grafter - do not edit by hand, this is maintained by automation"
+		gardenConfigMap.Annotations[authConfigMapManagedByAnnotation] = "shoot-grafter - do not edit by hand, this is maintained by automation"
 
 		gardenConfigMap.Data = map[string]string{authConfigMapKey: authContent}
 		return nil
