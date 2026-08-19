@@ -90,8 +90,14 @@ var _ = Describe("enqueueShoots", func() {
 
 		s := authScheme()
 		sc := &shoot.ShootController{
-			GardenClient: fake.NewClientBuilder().WithScheme(s).WithObjects(labeled, unrelated, unlabeled).Build(),
-			Logger:       logr.Discard(),
+			GardenClient: fake.NewClientBuilder().WithScheme(s).WithObjects(labeled, unrelated, unlabeled).
+				WithIndex(&gardenerv1beta1.Shoot{}, v1alpha1.ShootAuthConfiguredByLabel, func(o client.Object) []string {
+					if v := o.GetLabels()[v1alpha1.ShootAuthConfiguredByLabel]; v != "" {
+						return []string{v}
+					}
+					return nil
+				}).Build(),
+			Logger: logr.Discard(),
 			CareInstruction: &v1alpha1.CareInstruction{
 				ObjectMeta: metav1.ObjectMeta{Name: ciName, Namespace: "default"},
 			},
