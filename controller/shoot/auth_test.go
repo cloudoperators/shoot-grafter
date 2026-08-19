@@ -65,6 +65,52 @@ jwt:
       prefix: 'greenhouse:'
 `
 
+var _ = Describe("enqueueShoots", func() {
+	It("enqueues only shoots labeled with the CareInstruction name, not unrelated shoots", func() {
+		ctx := context.Background()
+		ciName := "my-ci"
+
+		labeled := &gardenerv1beta1.Shoot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "labeled-shoot",
+				Namespace: "default",
+				Labels:    map[string]string{v1alpha1.ShootAuthConfiguredByLabel: ciName},
+			},
+		}
+		unrelated := &gardenerv1beta1.Shoot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "unrelated-shoot",
+				Namespace: "default",
+				Labels:    map[string]string{v1alpha1.ShootAuthConfiguredByLabel: "other-ci"},
+			},
+		}
+		unlabeled := &gardenerv1beta1.Shoot{
+			ObjectMeta: metav1.ObjectMeta{Name: "unlabeled-shoot", Namespace: "default"},
+		}
+
+		s := authScheme()
+		sc := &shoot.ShootController{
+			GardenClient: fake.NewClientBuilder().WithScheme(s).WithObjects(labeled, unrelated, unlabeled).Build(),
+			Logger:       logr.Discard(),
+			CareInstruction: &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{Name: ciName, Namespace: "default"},
+			},
+		}
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-auth-cm",
+				Namespace: "default",
+				Labels:    map[string]string{v1alpha1.CareInstructionLabel: ciName},
+			},
+		}
+
+		reqs := sc.EnqueueShoots(ctx, cm)
+		Expect(reqs).To(HaveLen(1))
+		Expect(reqs[0].Name).To(Equal("labeled-shoot"))
+	})
+})
+
 var _ = Describe("configureOIDCAuthentication", func() {
 	var (
 		ctx              = context.Background()

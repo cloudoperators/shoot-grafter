@@ -88,7 +88,7 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
 		Watches(
 			&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(r.enqueueShoots),
+			handler.EnqueueRequestsFromMapFunc(r.EnqueueShoots),
 			builder.WithPredicates(
 				clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel),
 				clientutil.PredicateConfigMapDataChanged(),
@@ -117,10 +117,14 @@ func (r *ShootController) matchesCEL(shoot *gardenerv1beta1.Shoot) bool {
 	return matches
 }
 
-// enqueueShoots maps a ConfigMap change to reconcile requests for all Shoots in the same namespace.
-func (r *ShootController) enqueueShoots(ctx context.Context, obj client.Object) []ctrl.Request {
+// EnqueueShoots maps a ConfigMap change to reconcile requests for Shoots that were configured by the same CareInstruction.
+func (r *ShootController) EnqueueShoots(ctx context.Context, obj client.Object) []ctrl.Request {
+	ciName := obj.GetLabels()[v1alpha1.CareInstructionLabel]
 	var shoots gardenerv1beta1.ShootList
-	if err := r.GardenClient.List(ctx, &shoots, client.InNamespace(obj.GetNamespace())); err != nil {
+	if err := r.GardenClient.List(ctx, &shoots,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingLabels{v1alpha1.ShootAuthConfiguredByLabel: ciName},
+	); err != nil {
 		r.Error(err, "failed to list Shoots for ConfigMap watch")
 		return nil
 	}
