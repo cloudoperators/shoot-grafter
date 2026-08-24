@@ -324,19 +324,19 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 		return err
 	}
 
-	// Add a field index for ShootAuthConfiguredByLabel so EnqueueShoots lookups scale with cache.
+	// Add a field index for CareInstructionLabel so EnqueueShoots lookups scale with cache.
 	if err := shootControllerMgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&gardenerv1beta1.Shoot{},
-		v1alpha1.ShootAuthConfiguredByLabel,
+		v1alpha1.CareInstructionLabel,
 		func(o client.Object) []string {
-			if v := o.GetLabels()[v1alpha1.ShootAuthConfiguredByLabel]; v != "" {
+			if v := o.GetLabels()[v1alpha1.CareInstructionLabel]; v != "" {
 				return []string{v}
 			}
 			return nil
 		},
 	); err != nil {
-		return fmt.Errorf("failed to add field index for ShootAuthConfiguredByLabel: %w", err)
+		return fmt.Errorf("failed to add field index for CareInstructionLabel: %w", err)
 	}
 
 	// Register the ShootController with the garden manager

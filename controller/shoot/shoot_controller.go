@@ -123,7 +123,7 @@ func (r *ShootController) EnqueueShoots(ctx context.Context, obj client.Object) 
 	var shoots gardenerv1beta1.ShootList
 	if err := r.GardenClient.List(ctx, &shoots,
 		client.InNamespace(obj.GetNamespace()),
-		client.MatchingFields{v1alpha1.ShootAuthConfiguredByLabel: ciName},
+		client.MatchingFields{v1alpha1.CareInstructionLabel: ciName},
 	); err != nil {
 		r.Error(err, "failed to list Shoots for ConfigMap watch")
 		return nil

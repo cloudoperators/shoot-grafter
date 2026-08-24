@@ -1612,8 +1612,8 @@ jwt:
 				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication).NotTo(BeNil())
 				g.Expect(updatedShoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication.ConfigMapName).To(Equal("test-careinstruction-oidc-greenhouse-auth"))
 
-				// Verify Shoot carries the auth-configured-by label
-				g.Expect(updatedShoot.Labels).To(HaveKeyWithValue(v1alpha1.ShootAuthConfiguredByLabel, "test-careinstruction-oidc"))
+				// Verify Shoot carries the careinstruction label
+				g.Expect(updatedShoot.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, "test-careinstruction-oidc"))
 
 				return true
 			}).Should(BeTrue(), "should eventually update shoot spec with ConfigMap reference")

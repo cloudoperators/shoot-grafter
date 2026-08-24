@@ -33,7 +33,7 @@ const (
 	// CommonCleanupFinalizer is the finalizer used to clean up resources when a CareInstruction is deleted.
 	CommonCleanupFinalizer = "shoot-grafter.cloudoperators.dev/finalizer"
 
-	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
+	// CareInstructionLabel is the label used to identify resources owned or configured by this CareInstruction.
 	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
@@ -50,10 +50,6 @@ const (
 
 	// ShootStatusExcluded indicates the shoot was excluded by the ShootSelector filter criteria.
 	ShootStatusExcluded = "Excluded"
-
-	// ShootAuthConfiguredByLabel is the label placed on a Shoot to identify which CareInstruction
-	// configured its OIDC authentication.
-	ShootAuthConfiguredByLabel = "shoot-grafter.cloudoperators.dev/auth-configured-by"
 )
 
 // ShootSelector combines label-based and CEL expression-based filtering for shoots.

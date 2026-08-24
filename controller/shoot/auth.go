@@ -96,15 +96,15 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 		r.Info("AuthenticationConfiguration ConfigMap updated", "name", configMapName, "shoot", shoot.Name)
 	}
 
-	// Ensure the Shoot carries the auth-configured-by label.
-	if shoot.Labels == nil || shoot.Labels[v1alpha1.ShootAuthConfiguredByLabel] != r.CareInstruction.Name {
+	// Ensure the Shoot carries the careinstruction label.
+	if shoot.Labels == nil || shoot.Labels[v1alpha1.CareInstructionLabel] != r.CareInstruction.Name {
 		shootBase := shoot.DeepCopy()
 		if shoot.Labels == nil {
 			shoot.Labels = make(map[string]string)
 		}
-		shoot.Labels[v1alpha1.ShootAuthConfiguredByLabel] = r.CareInstruction.Name
+		shoot.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
 		if patchErr := r.GardenClient.Patch(ctx, shoot, client.MergeFrom(shootBase)); patchErr != nil {
-			return fmt.Errorf("failed to patch auth-configured-by label on Shoot: %w", patchErr)
+			return fmt.Errorf("failed to patch careinstruction label on Shoot: %w", patchErr)
 		}
 	}
 

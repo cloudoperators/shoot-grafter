@@ -74,14 +74,14 @@ var _ = Describe("enqueueShoots", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "labeled-shoot",
 				Namespace: "default",
-				Labels:    map[string]string{v1alpha1.ShootAuthConfiguredByLabel: ciName},
+				Labels:    map[string]string{v1alpha1.CareInstructionLabel: ciName},
 			},
 		}
 		unrelated := &gardenerv1beta1.Shoot{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "unrelated-shoot",
 				Namespace: "default",
-				Labels:    map[string]string{v1alpha1.ShootAuthConfiguredByLabel: "other-ci"},
+				Labels:    map[string]string{v1alpha1.CareInstructionLabel: "other-ci"},
 			},
 		}
 		unlabeled := &gardenerv1beta1.Shoot{
@@ -91,8 +91,8 @@ var _ = Describe("enqueueShoots", func() {
 		s := authScheme()
 		sc := &shoot.ShootController{
 			GardenClient: fake.NewClientBuilder().WithScheme(s).WithObjects(labeled, unrelated, unlabeled).
-				WithIndex(&gardenerv1beta1.Shoot{}, v1alpha1.ShootAuthConfiguredByLabel, func(o client.Object) []string {
-					if v := o.GetLabels()[v1alpha1.ShootAuthConfiguredByLabel]; v != "" {
+				WithIndex(&gardenerv1beta1.Shoot{}, v1alpha1.CareInstructionLabel, func(o client.Object) []string {
+					if v := o.GetLabels()[v1alpha1.CareInstructionLabel]; v != "" {
 						return []string{v}
 					}
 					return nil
@@ -152,7 +152,7 @@ var _ = Describe("configureOIDCAuthentication", func() {
 		Expect(gardenCM.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, "my-ci"))
 	})
 
-	It("adds ShootAuthConfiguredByLabel to the Shoot", func() {
+	It("adds CareInstructionLabel to the Shoot", func() {
 		shoot := &gardenerv1beta1.Shoot{
 			ObjectMeta: metav1.ObjectMeta{Name: "my-shoot", Namespace: "default"},
 		}
@@ -164,7 +164,7 @@ var _ = Describe("configureOIDCAuthentication", func() {
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
 			Namespace: "default", Name: "my-shoot",
 		}, &updatedShoot)).To(Succeed())
-		Expect(updatedShoot.Labels).To(HaveKeyWithValue(v1alpha1.ShootAuthConfiguredByLabel, "my-ci"))
+		Expect(updatedShoot.Labels).To(HaveKeyWithValue(v1alpha1.CareInstructionLabel, "my-ci"))
 	})
 
 	It("uses the default CM name (<ci-name>-greenhouse-auth) when Shoot has no existing reference", func() {
