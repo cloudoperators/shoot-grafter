@@ -33,7 +33,7 @@ const (
 	// CommonCleanupFinalizer is the finalizer used to clean up resources when a CareInstruction is deleted.
 	CommonCleanupFinalizer = "shoot-grafter.cloudoperators.dev/finalizer"
 
-	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
+	// CareInstructionLabel is the label used to identify resources owned or configured by this CareInstruction.
 	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps

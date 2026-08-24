@@ -149,7 +149,10 @@ For each CareInstruction, a dedicated Shoot controller is dynamically created an
 - Optionally configures RBAC on the Shoot cluster for Greenhouse access
 - Cleans up Greenhouse clusters when the corresponding Gardener Shoot is removed
 
-> **Auth ConfigMap labeling & watch**: When `authenticationConfigMapName` is set, the shoot controller labels the referenced Greenhouse ConfigMap with `shoot-grafter.cloudoperators.dev/auth-configmap: "true"` on first interaction. The CareInstruction controller watches these labeled ConfigMaps; when the data changes, all CareInstructions referencing that ConfigMap are re-enqueued so the updated CM data is transported to the Garden cluster on the next reconcile. Multiple CareInstructions may reference the same ConfigMap.
+> **Auth ConfigMap labeling & watch**: When `authenticationConfigMapName` is set, the shoot controller:
+> - Labels the referenced Greenhouse ConfigMap with `shoot-grafter.cloudoperators.dev/auth-configmap: "true"` so the CareInstruction controller can watch it. When the data changes, all CareInstructions referencing that ConfigMap are re-enqueued.
+> - Creates or overwrites a ConfigMap in the Garden cluster with the Greenhouse content verbatim. That Garden CM is labeled `shoot-grafter.cloudoperators.dev/careinstruction: <careInstructionName>` to mark ownership and to scope the CM-change watch to Shoots managed by the same CareInstruction.
+> - Labels each configured Shoot with `shoot-grafter.cloudoperators.dev/careinstruction: <careInstructionName>` so that Garden CM changes trigger reconciliation of only the relevant Shoots.
 
 ## Custom Resource: CareInstruction
 
@@ -368,7 +371,7 @@ spec:
     labelSelector:
       matchLabels:
         enabled-oidc: "true"
-  authenticationConfigMapRef: greenhouse-oidc-config
+  authenticationConfigMapName: greenhouse-oidc-config
   propagateLabels:
     - metadata.greenhouse.sap/environment
 ```
@@ -406,7 +409,7 @@ When `spec.authenticationConfigMapName` is configured in a CareInstruction, shoo
 1. **Initial Setup**: When a Shoot is first onboarded, shoot-grafter creates an AuthenticationConfiguration ConfigMap in the Garden cluster and updates the Shoot's spec to reference it.
 
 2. **Configuration Updates**: When the Greenhouse AuthenticationConfiguration ConfigMap is updated with new OIDC settings:
-   - shoot-grafter merges the updated configuration with any existing Garden cluster configuration
+   - shoot-grafter overwrites the Garden cluster ConfigMap verbatim with the Greenhouse content — shoot-grafter is the sole owner of that ConfigMap's data
    - If the Shoot spec already references the correct ConfigMap (no spec change needed), shoot-grafter automatically triggers a Shoot reconciliation by annotating it with `gardener.cloud/operation: reconcile` to apply the changes immediately without waiting for the Shoot's maintenance window
    - See the [Gardener documentation on immediate reconciliation](https://gardener.cloud/docs/gardener/shoot-operations/shoot_operations/#immediate-reconciliation) for more details
 
