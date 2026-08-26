@@ -89,6 +89,10 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return lifecycle.Reconcile(ctx, r.Client, req.NamespacedName, &v1alpha1.CareInstruction{}, r, nil)
 }
 
+func (r *CareInstructionReconciler) GetFinalizerName() string {
+	return v1alpha1.CommonCleanupFinalizer
+}
+
 func (r *CareInstructionReconciler) EnsureCreated(ctx context.Context, obj lifecycle.RuntimeObject) (ctrl.Result, lifecycle.ReconcileResult, error) {
 	r.Logger = ctrl.LoggerFrom(ctx)
 	r.Info("Reconciling CareInstruction creation/updating", "name", obj.GetName(), "namespace", obj.GetNamespace())
