@@ -5,6 +5,7 @@ package careinstruction_test
 
 import (
 	"shoot-grafter/api/v1alpha1"
+	"shoot-grafter/controller/careinstruction"
 	"shoot-grafter/internal/test"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
@@ -12,6 +13,8 @@ import (
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -997,6 +1000,122 @@ var _ = Describe("CareInstruction Controller", func() {
 		})
 	})
 
+	Context("When a CareInstruction has the shoot-grafter.cloudoperators.dev/reconcile annotation", func() {
+		It("should restart the shoot controller and remove the annotation", func() {
+			By("creating a CareInstruction")
+			ci := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ci-reconcile-annotation",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, ci)).To(Succeed())
+
+			By("waiting for the Shoot controller to start")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.IsTrue()).To(BeTrue())
+			}).Should(Succeed())
+
+			By("annotating the CareInstruction with the reconcile annotation")
+			base := ci.DeepCopy()
+			if ci.Annotations == nil {
+				ci.Annotations = make(map[string]string)
+			}
+			ci.Annotations[v1alpha1.ReconcileAnnotation] = "true"
+			Expect(test.K8sClient.Patch(test.Ctx, ci, client.MergeFrom(base))).To(Succeed())
+
+			By("verifying the annotation is removed from the CareInstruction")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Annotations).NotTo(HaveKey(v1alpha1.ReconcileAnnotation))
+			}).Should(Succeed())
+
+			By("verifying the shoot controller restarts")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(BeNumerically(">", 0))
+			}).Should(Succeed())
+		})
+	})
+
+	Context("When a Greenhouse Cluster has the shoot-grafter.cloudoperators.dev/reconcile annotation", func() {
+		It("should annotate the matching Shoot and remove the annotation from the Cluster", func() {
+			By("creating a Shoot on the garden cluster")
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cluster-reconcile-shoot",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cluster-reconcile"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+
+			By("creating a CareInstruction targeting the Shoot")
+			ci := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ci-cluster-reconcile",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					GardenNamespace:   "default",
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "cluster-reconcile"},
+						},
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, ci)).To(Succeed())
+
+			By("waiting for the Shoot controller to start")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.IsTrue()).To(BeTrue())
+			}).Should(Succeed())
+
+			By("creating a Greenhouse Cluster owned by the CareInstruction")
+			cluster := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot.Name,
+					Namespace: "default",
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: ci.Name,
+					},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{
+					AccessMode: greenhousev1alpha1.ClusterAccessModeDirect,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster)).To(Succeed())
+
+			By("annotating the Cluster with shoot-grafter.cloudoperators.dev/reconcile")
+			base := cluster.DeepCopy()
+			cluster.Annotations = map[string]string{v1alpha1.ReconcileAnnotation: "true"}
+			Expect(test.K8sClient.Patch(test.Ctx, cluster, client.MergeFrom(base))).To(Succeed())
+
+			By("verifying gardener.cloud/operation=reconcile is set on the Shoot")
+			Eventually(func(g Gomega) {
+				g.Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shoot), shoot)).To(Succeed())
+				g.Expect(shoot.Annotations).To(HaveKeyWithValue("gardener.cloud/operation", "reconcile"))
+			}).Should(Succeed())
+
+			By("verifying the annotation is removed from the Cluster")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(cluster), cluster)).To(Succeed())
+				g.Expect(cluster.Annotations).NotTo(HaveKey(v1alpha1.ReconcileAnnotation))
+			}).Should(Succeed())
+		})
+	})
+
 	Context("When a CareInstruction is deleted", func() {
 		It("should stop the Shoot controller", func() {
 			shoot := &gardenerv1beta1.Shoot{
@@ -1264,6 +1383,179 @@ var _ = Describe("CareInstruction Controller", func() {
 				}
 				return true
 			}).Should(BeTrue())
+		})
+
+		It("should report a previously onboarded shoot only once when it stops matching the CEL expression", func() {
+			By("Creating a healthy shoot that matches the CEL expression")
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cel-shoot-regressed",
+					Namespace: "default",
+					Labels:    map[string]string{"test": "cel-regression"},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed())
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				LastOperation: &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+			careInstruction := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cel-regression",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName: test.GardenClusterName,
+					ShootSelector: &v1alpha1.ShootSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"test": "cel-regression"},
+						},
+						Expression: `object.status.lastOperation.state == "Succeeded"`,
+					},
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, careInstruction)).To(Succeed())
+
+			By("Onboarding the shoot by creating an owned, ready cluster")
+			cluster := &greenhousev1alpha1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shoot.Name,
+					Namespace: "default",
+					Labels:    map[string]string{v1alpha1.CareInstructionLabel: careInstruction.Name},
+				},
+				Spec: greenhousev1alpha1.ClusterSpec{AccessMode: greenhousev1alpha1.ClusterAccessModeDirect},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, cluster)).To(Succeed())
+			cluster.Status.SetConditions(greenhousemetav1alpha1.NewCondition(
+				greenhousemetav1alpha1.ReadyCondition, metav1.ConditionTrue, "ClusterReady", "Cluster is ready"))
+			Expect(test.K8sClient.Status().Update(test.Ctx, cluster)).To(Succeed())
+
+			gaugeLabels := prometheus.Labels{
+				"care_instruction": careInstruction.Name,
+				"namespace":        careInstruction.Namespace,
+				"garden_namespace": careInstruction.Spec.GardenNamespace,
+				"shoot_name":       shoot.Name,
+			}
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+				g.Expect(careInstruction.Status.Shoots).To(HaveLen(1))
+				g.Expect(careInstruction.Status.Shoots[0].Status).To(Equal(v1alpha1.ShootStatusOnboarded))
+				g.Expect(promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(gaugeLabels))).To(Equal(1.0))
+				return true
+			}).Should(BeTrue(), "shoot should first be onboarded")
+
+			By("Degrading the shoot so it no longer matches the CEL expression")
+			Expect(test.GardenK8sClient.Get(test.Ctx, client.ObjectKeyFromObject(shoot), shoot)).To(Succeed())
+			shoot.Status.LastOperation = &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateFailed}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed())
+
+			Eventually(func(g Gomega) bool {
+				defer func() {
+					test.ReconcileObject(careInstruction)
+				}()
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(careInstruction), careInstruction)).To(Succeed())
+
+				g.Expect(careInstruction.Status.Shoots).To(HaveLen(1), "the shoot must be listed exactly once")
+				g.Expect(careInstruction.Status.Shoots[0].Name).To(Equal(shoot.Name))
+				g.Expect(careInstruction.Status.Shoots[0].Status).To(Equal(v1alpha1.ShootStatusExcluded))
+				g.Expect(careInstruction.Status.Shoots[0].Message).To(ContainSubstring("filtered out by CEL expression"))
+
+				g.Expect(careInstruction.Status.CreatedClusters).To(Equal(1), "the owned cluster still exists")
+				g.Expect(careInstruction.Status.FailedClusters).To(Equal(0))
+
+				shootsReconciledCondition := careInstruction.Status.GetConditionByType(v1alpha1.ShootsReconciledCondition)
+				g.Expect(shootsReconciledCondition).ToNot(BeNil())
+				g.Expect(shootsReconciledCondition.Status).To(Equal(metav1.ConditionTrue), "an excluded shoot must not block reconciliation")
+
+				g.Expect(promtest.ToFloat64(careinstruction.ShootOnboardedGauge.With(gaugeLabels))).To(Equal(0.0), "the onboarded gauge must follow the deduplicated status")
+
+				return true
+			}).Should(BeTrue(), "excluded shoot should replace the onboarded entry")
+		})
+	})
+
+	Context("When the auth ConfigMap data changes", func() {
+		It("should restart the shoot controller", func() {
+			By("creating an auth ConfigMap")
+			authCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "auth-cm-change-test",
+					Namespace: "default",
+				},
+				Data: map[string]string{"config.yaml": "v1"},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, authCM)).To(Succeed())
+
+			By("creating a CareInstruction with authenticationConfigMapName set")
+			ci := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ci-auth-cm-change",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.CareInstructionSpec{
+					GardenClusterName:           test.GardenClusterName,
+					AuthenticationConfigMapName: authCM.Name,
+				},
+			}
+			Expect(test.K8sClient.Create(test.Ctx, ci)).To(Succeed())
+
+			By("waiting for the Shoot controller to start")
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				cond := ci.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.IsTrue()).To(BeTrue())
+			}).Should(Succeed())
+
+			By("updating only ConfigMap metadata and verifying the shoot controller does not restart")
+			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(authCM), authCM)).To(Succeed())
+			base := authCM.DeepCopy()
+			if authCM.Labels == nil {
+				authCM.Labels = map[string]string{}
+			}
+			authCM.Labels["some-label"] = "some-value"
+			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
+			test.ReconcileObject(ci)
+			Consistently(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
+			}).Should(Succeed())
+
+			By("adding an extra data key and verifying the shoot controller does not restart")
+			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(authCM), authCM)).To(Succeed())
+			base = authCM.DeepCopy()
+			authCM.Data["unrelated-key"] = "some-value"
+			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
+			test.ReconcileObject(ci)
+			Consistently(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(0))
+			}).Should(Succeed())
+
+			By("updating the auth ConfigMap data and verifying the shoot controller restarts")
+			base = authCM.DeepCopy()
+			authCM.Data["config.yaml"] = "v2"
+			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(1))
+			}).Should(Succeed())
+
+			By("verifying a second CM data update also triggers a restart")
+			base = authCM.DeepCopy()
+			authCM.Data["config.yaml"] = "v3"
+			Expect(test.K8sClient.Patch(test.Ctx, authCM, client.MergeFrom(base))).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(ci), ci)).To(Succeed())
+				g.Expect(ci.Status.ShootControllerRestartCount).To(Equal(2))
+			}).Should(Succeed())
 		})
 	})
 

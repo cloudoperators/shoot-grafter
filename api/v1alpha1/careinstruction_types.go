@@ -12,6 +12,7 @@ import (
 	"github.com/cloudoperators/greenhouse/pkg/cel"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -32,11 +33,14 @@ const (
 	// CommonCleanupFinalizer is the finalizer used to clean up resources when a CareInstruction is deleted.
 	CommonCleanupFinalizer = "shoot-grafter.cloudoperators.dev/finalizer"
 
-	// CareInstructionLabel is the label used to identify resources created by this CareInstruction.
+	// CareInstructionLabel is the label used to identify resources owned or configured by this CareInstruction.
 	CareInstructionLabel = "shoot-grafter.cloudoperators.dev/careinstruction"
 
 	// AuthConfigMapLabel is the label used to identify AuthenticationConfiguration ConfigMaps
-	AuthConfigMapLabel = "shoot-grafter.cloudoperators/authconfigmap"
+	AuthConfigMapLabel = "shoot-grafter.cloudoperators.dev/auth-configmap"
+
+	// ReconcileAnnotation can be set on a Cluster or CareInstruction to trigger reconciliation of the matching Shoot(s).
+	ReconcileAnnotation = "shoot-grafter.cloudoperators.dev/reconcile"
 
 	// ShootStatusOnboarded indicates the shoot has been onboarded as a Greenhouse Cluster.
 	ShootStatusOnboarded = "Onboarded"
@@ -131,6 +135,9 @@ type CareInstructionStatus struct {
 
 	// FailedClusters is the number of clusters that failed to be created by this CareInstruction.
 	FailedClusters int `json:"failedClusters,omitempty"`
+
+	// ShootControllerRestartCount is the number of times the shoot controller has been restarted.
+	ShootControllerRestartCount int `json:"shootControllerRestartCount,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -155,7 +162,10 @@ type CareInstructionList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&CareInstruction{}, &CareInstructionList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &CareInstruction{}, &CareInstructionList{})
+		return nil
+	})
 }
 
 // ListShoots returns shoots matching the ShootSelector.LabelSelector.

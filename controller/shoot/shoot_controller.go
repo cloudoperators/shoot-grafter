@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"shoot-grafter/api/v1alpha1"
+	"shoot-grafter/internal/clientutil"
 
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
@@ -84,6 +86,14 @@ func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(r.Name).
 		For(&gardenerv1beta1.Shoot{}, builder.WithPredicates(predicates...)).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.EnqueueShoots),
+			builder.WithPredicates(
+				clientutil.PredicateHasLabel(v1alpha1.CareInstructionLabel),
+				clientutil.PredicateConfigMapDataChanged(),
+			),
+		).
 		Complete(r)
 }
 
@@ -107,33 +117,83 @@ func (r *ShootController) matchesCEL(shoot *gardenerv1beta1.Shoot) bool {
 	return matches
 }
 
+// EnqueueShoots maps a ConfigMap change to reconcile requests for Shoots that were configured by the same CareInstruction.
+func (r *ShootController) EnqueueShoots(ctx context.Context, obj client.Object) []ctrl.Request {
+	ciName := obj.GetLabels()[v1alpha1.CareInstructionLabel]
+	var shoots gardenerv1beta1.ShootList
+	if err := r.GardenClient.List(ctx, &shoots,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{v1alpha1.CareInstructionLabel: ciName},
+	); err != nil {
+		r.Error(err, "failed to list Shoots for ConfigMap watch")
+		return nil
+	}
+	reqs := make([]ctrl.Request, 0, len(shoots.Items))
+	for _, s := range shoots.Items {
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKey{Name: s.Name, Namespace: s.Namespace}})
+	}
+	return reqs
+}
+
 func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.Info("Reconciling Shoot", "name", req.Name, "namespace", req.Namespace)
 
 	// Check if a cluster with this name already exists and is owned by a different CareInstruction
 	// Do this early to avoid unnecessary work
-	var existingCluster greenhousev1alpha1.Cluster
+	var (
+		existingCluster greenhousev1alpha1.Cluster
+		ownerLabel      string
+		hasLabel        bool
+	)
+	existingClusterFound := false
 	err := r.GreenhouseClient.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: r.CareInstruction.Namespace}, &existingCluster)
-	if err == nil {
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+	} else {
 		// Cluster exists - check ownership
-		if ownerLabel, hasLabel := existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
-			// TODO: emit event on CareInstruction
+		if ownerLabel, hasLabel = existingCluster.Labels[v1alpha1.CareInstructionLabel]; hasLabel && ownerLabel != r.CareInstruction.Name {
 			r.Info("Skipping shoot - cluster already owned by different CareInstruction",
 				"shoot", req.Name,
 				"currentOwner", ownerLabel,
 				"attemptedOwner", r.CareInstruction.Name)
 			return ctrl.Result{}, nil
 		}
+		existingClusterFound = true
 	}
 
 	var shoot gardenerv1beta1.Shoot
 	if err := r.GardenClient.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, &shoot); err != nil {
-		r.Info("unable to fetch Shoot")
 		if client.IgnoreNotFound(err) == nil {
 			// Shoot was deleted
+			if existingClusterFound && hasLabel && ownerLabel == r.CareInstruction.Name {
+				if err := r.RequestClusterDeletion(ctx, existingCluster); err != nil {
+					r.Info(
+						"error during Cluster removal",
+						"name", existingCluster.Name,
+						"error", err.Error(),
+					)
+					r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "ClusterDeletionFailed",
+						fmt.Sprintf(
+							"Shoot %s/%s deleted, deletion of Cluster %s/%s failed with error: %s",
+							r.CareInstruction.Namespace, existingCluster.Name,
+							existingCluster.Namespace, existingCluster.Name,
+							err.Error(),
+						))
+					return ctrl.Result{}, client.IgnoreNotFound(err)
+				}
+				r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ClusterDeleted",
+					fmt.Sprintf(
+						"Shoot %s/%s deleted, deletion of Cluster %s/%s was requested",
+						r.CareInstruction.Namespace, existingCluster.Name,
+						existingCluster.Namespace, existingCluster.Name,
+					))
+			}
 			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "ShootDeleted",
 				fmt.Sprintf("Shoot %s/%s was deleted", req.Namespace, req.Name))
 		}
+		r.Info("unable to fetch Shoot", "name", req.Name, "error", err.Error())
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -279,7 +339,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
 		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
-		if err := r.configureOIDCAuthentication(ctx, &shoot); err != nil {
+		if err := r.ConfigureOIDCAuthentication(ctx, &shoot); err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
 				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
@@ -313,7 +373,28 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{}, nil
 }
 
+func (r *ShootController) RequestClusterDeletion(ctx context.Context, existingCluster greenhousev1alpha1.Cluster) error {
+	if err := r.GreenhouseClient.Delete(ctx, &existingCluster); err != nil {
+		return err
+	}
+	return nil
+}
+
 // GenerateName generates a name for the shoot controller based on the garden cluster name.
 func GenerateName(gardenClusterName string) string {
 	return "shoot-controller-" + gardenClusterName
+}
+
+// AnnotateShootForReconcile sets gardener.cloud/operation: reconcile on the named Shoot.
+func AnnotateShootForReconcile(ctx context.Context, gardenClient client.Client, namespace, name string) error {
+	var s gardenerv1beta1.Shoot
+	if err := gardenClient.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &s); err != nil {
+		return fmt.Errorf("failed to get Shoot %s/%s: %w", namespace, name, err)
+	}
+	base := s.DeepCopy()
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]string)
+	}
+	s.Annotations["gardener.cloud/operation"] = "reconcile"
+	return gardenClient.Patch(ctx, &s, client.MergeFrom(base))
 }

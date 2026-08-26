@@ -4,10 +4,12 @@
 package clientutil
 
 import (
+	"maps"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
@@ -27,4 +29,20 @@ func PredicateHasLabel(key string) predicate.Predicate {
 		_, exists := o.GetLabels()[key]
 		return exists
 	})
+}
+
+// PredicateConfigMapDataChanged fires on Create and on Update only when the ConfigMap Data changes.
+func PredicateConfigMapDataChanged() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(_ event.CreateEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldCM, ok1 := e.ObjectOld.(*corev1.ConfigMap)
+			newCM, ok2 := e.ObjectNew.(*corev1.ConfigMap)
+			if !ok1 || !ok2 {
+				return false
+			}
+			return !maps.Equal(oldCM.Data, newCM.Data)
+		},
+		DeleteFunc: func(_ event.DeleteEvent) bool { return false },
+	}
 }
