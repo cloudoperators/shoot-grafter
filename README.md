@@ -415,6 +415,22 @@ When `spec.authenticationConfigMapName` is configured in a CareInstruction, shoo
 
 **Note**: If the Shoot spec needs to be updated (e.g., when the ConfigMap reference changes), the spec update itself triggers reconciliation automatically, so no additional annotation is needed.
 
+### Moving a Shoot to another CareInstruction
+
+Ownership of an onboarded Shoot is recorded in the `shoot-grafter.cloudoperators.dev/careinstruction` label on its Greenhouse Secret, which Greenhouse propagates to the Cluster. Ownership follows this label, not the CareInstruction selectors, so changing selectors alone moves nothing.
+
+Relabel the Secret, then trigger the new CareInstruction:
+
+```bash
+kubectl label secret <shoot-name> -n <greenhouse-namespace> --overwrite \
+  shoot-grafter.cloudoperators.dev/careinstruction=<new-careinstruction>
+
+kubectl annotate careinstruction <new-careinstruction> -n <greenhouse-namespace> --overwrite \
+  shoot-grafter.cloudoperators.dev/reconcile=true
+```
+
+The annotation is required. After the label change the new CareInstruction already reports the Shoot as `Onboarded`, because that status is derived from the Cluster labels, but the shoot controller only runs on Shoot events from the Garden cluster and never re-applies OIDC, RBAC or the authentication ConfigMap. The annotation restarts it. The value must be the literal string `true`. See [Triggering Reconciliation](#triggering-reconciliation).
+
 ## Debugging Shoot Reconciliation
 
 shoot-grafter emits Kubernetes events to help you monitor and debug the Shoot onboarding process. Events are associated with the CareInstruction resource.
