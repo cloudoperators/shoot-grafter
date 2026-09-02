@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company
+# SPDX-License-Identifier: Apache-2.0
+
+name: Cut Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  cut-release:
+    uses: cloudoperators/common/.github/workflows/shared-release.yaml@main
+    permissions:
+      contents: write
+    with:
+      bump: ${{ inputs.bump }}
+      makefile-path: Makefile
+      environment: release
+    secrets:
+      release-token: ${{ secrets.RELEASE_GH_TOKEN_PR }}

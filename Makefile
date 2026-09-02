@@ -33,6 +33,13 @@ endif
 
 default: build-all
 
+VERSION = 0.3.0
+
+# Wire envtest into the generated build/cover.out target so 'make build/cover.out'
+# works standalone (as called by the CI workflow) without needing KUBEBUILDER_ASSETS set.
+GO_TESTENV += KUBEBUILDER_ASSETS=$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)
+build/cover.out: setup-envtest
+
 include hack/kubebuilder.mk
 
 install-goimports: FORCE
