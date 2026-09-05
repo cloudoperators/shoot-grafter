@@ -6,6 +6,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -165,6 +166,22 @@ func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
 		s.AddKnownTypes(GroupVersion, &CareInstruction{}, &CareInstructionList{})
 		return nil
+	})
+}
+
+func (c *CareInstruction) CanBeSuspended() bool { return false }
+
+func (c *CareInstruction) GetConditions() greenhousemetav1alpha1.StatusConditions {
+	return c.Status.StatusConditions
+}
+
+func (c *CareInstruction) SetCondition(condition greenhousemetav1alpha1.Condition) {
+	c.Status.SetConditions(condition)
+}
+
+func (c *CareInstruction) RemoveCondition(conditionType greenhousemetav1alpha1.ConditionType) {
+	c.Status.Conditions = slices.DeleteFunc(c.Status.Conditions, func(cond greenhousemetav1alpha1.Condition) bool {
+		return cond.Type == conditionType
 	})
 }
 
