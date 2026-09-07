@@ -290,6 +290,7 @@ var _ = Describe("Shoot Controller", func() {
 							"baz": "qux",
 						},
 					},
+					Spec: gardenerv1beta1.ShootSpec{Provider: gardenerv1beta1.Provider{Type: "gcp", Workers: []gardenerv1beta1.Worker{{Name: "worker-pool-1"}}}},
 				},
 			}, []gardenerv1beta1.ShootStatus{
 				{
@@ -344,6 +345,7 @@ var _ = Describe("Shoot Controller", func() {
 							"baz": "qux",
 						},
 					},
+					Spec: gardenerv1beta1.ShootSpec{Provider: gardenerv1beta1.Provider{Type: "gcp", Workers: []gardenerv1beta1.Worker{{Name: "worker-pool-1"}}}},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -354,6 +356,7 @@ var _ = Describe("Shoot Controller", func() {
 							"baz": "quux",
 						},
 					},
+					Spec: gardenerv1beta1.ShootSpec{Provider: gardenerv1beta1.Provider{Type: "gcp", Workers: []gardenerv1beta1.Worker{{Name: "worker-pool-1"}}}},
 				},
 			}, []gardenerv1beta1.ShootStatus{
 				{
@@ -445,6 +448,7 @@ var _ = Describe("Shoot Controller", func() {
 							"baz": "qux",
 						},
 					},
+					Spec: gardenerv1beta1.ShootSpec{Provider: gardenerv1beta1.Provider{Type: "gcp", Workers: []gardenerv1beta1.Worker{{Name: "worker-pool-1"}}}},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -454,6 +458,7 @@ var _ = Describe("Shoot Controller", func() {
 							"baz": "quux",
 						},
 					},
+					Spec: gardenerv1beta1.ShootSpec{Provider: gardenerv1beta1.Provider{Type: "gcp", Workers: []gardenerv1beta1.Worker{{Name: "worker-pool-1"}}}},
 				},
 			}, []gardenerv1beta1.ShootStatus{
 				{
@@ -522,7 +527,140 @@ var _ = Describe("Shoot Controller", func() {
 					},
 				},
 			),
+			Entry("with a workerless shoot (no workers in spec.provider.workers)", []gardenerv1beta1.Shoot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-shoot-workerless",
+						Namespace: "default",
+						Labels: map[string]string{
+							"foo": "bar",
+							"baz": "qux",
+						},
+					},
+					Spec: gardenerv1beta1.ShootSpec{
+						Provider: gardenerv1beta1.Provider{
+							Type:    "gcp",
+							Workers: []gardenerv1beta1.Worker{},
+						},
+					},
+				},
+			}, []gardenerv1beta1.ShootStatus{
+				{
+					AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+						{
+							Name: "external",
+							URL:  "https://api-server.test-shoot-workerless.example.com",
+						},
+					},
+				},
+			}, []corev1.ConfigMap{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-shoot-workerless.ca-cluster",
+						Namespace: "default",
+					},
+					Data: map[string]string{
+						"ca.crt": "test-ca-data",
+					},
+				},
+			}, []corev1.Secret{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-shoot-workerless",
+						Namespace: "default",
+						Labels: map[string]string{
+							"shoot-grafter.cloudoperators.dev/careinstruction": "test-careinstruction",
+							"foo":  "bar",
+							"baz":  "qux",
+							"quux": "corge",
+						},
+						Annotations: map[string]string{
+							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
+							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-workerless.example.com",
+							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
+							"greenhouse.sap/workerless":                                "true",
+						},
+					},
+					Data: map[string][]byte{
+						"ca.crt": []byte(base64.StdEncoding.EncodeToString([]byte("test-ca-data"))),
+					},
+				},
+			},
+				[]corev1.Secret{},
+			),
 		)
+
+		It("should remove workerless annotation when shoot gains workers", func() {
+			// Pre-create a Secret with the workerless annotation (simulating a formerly workerless shoot)
+			existingSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-gain-workers",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"greenhouse.sap/propagate-labels":                          "shoot-grafter.cloudoperators.dev/careinstruction",
+						greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-gain-workers.example.com",
+						"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
+						"greenhouse.sap/workerless":                                "true",
+					},
+					Labels: map[string]string{
+						v1alpha1.CareInstructionLabel: careInstruction.Name,
+					},
+				},
+				Type: greenhouseapis.SecretTypeOIDCConfig,
+			}
+			Expect(test.K8sClient.Create(test.Ctx, existingSecret)).To(Succeed(), "should pre-create Secret with workerless annotation")
+
+			// Create a shoot that now has workers
+			shoot := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-gain-workers",
+					Namespace: "default",
+					Labels: map[string]string{
+						"foo": "bar",
+						"baz": "qux",
+					},
+				},
+				Spec: gardenerv1beta1.ShootSpec{
+					Provider: gardenerv1beta1.Provider{
+						Type: "gcp",
+						Workers: []gardenerv1beta1.Worker{
+							{Name: "worker-pool-1"},
+						},
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
+			shoot.Status = gardenerv1beta1.ShootStatus{
+				AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+					{
+						Name: "external",
+						URL:  "https://api-server.test-shoot-gain-workers.example.com",
+					},
+				},
+			}
+			Expect(test.GardenK8sClient.Status().Update(test.Ctx, shoot)).To(Succeed(), "should update Shoot status")
+
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-shoot-gain-workers.ca-cluster",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"ca.crt": "test-ca-data",
+				},
+			}
+			Expect(test.GardenK8sClient.Create(test.Ctx, cm)).To(Succeed(), "should create ConfigMap resource")
+
+			Eventually(func(g Gomega) {
+				secret := &corev1.Secret{}
+				g.Expect(test.K8sClient.Get(test.Ctx, client.ObjectKey{
+					Name:      "test-shoot-gain-workers",
+					Namespace: "default",
+				}, secret)).To(Succeed())
+				g.Expect(secret.Annotations).NotTo(HaveKey("greenhouse.sap/workerless"),
+					"workerless annotation should be removed when shoot has workers")
+			}).Should(Succeed(), "should eventually remove workerless annotation")
+		})
 
 		It("should merge annotations and labels with existing ones on secret updates", func() {
 			// Create a shoot
@@ -744,6 +882,7 @@ var _ = Describe("Shoot Controller", func() {
 						"baz": "qux",
 					},
 				},
+				Spec: gardenerv1beta1.ShootSpec{Provider: gardenerv1beta1.Provider{Type: "gcp", Workers: []gardenerv1beta1.Worker{{Name: "worker-pool-1"}}}},
 			}
 			Expect(test.GardenK8sClient.Create(test.Ctx, shoot)).To(Succeed(), "should create Shoot resource")
 
