@@ -39,6 +39,10 @@ const (
 	// managedAnnotationKeysAnnotation tracks which annotation keys are managed by additionalAnnotations
 	// so stale keys can be removed when they are removed from the spec.
 	managedAnnotationKeysAnnotation = "shoot-grafter.cloudoperators.dev/managed-annotation-keys"
+
+	// workerlessAnnotation is set on the cluster secret when the shoot has no worker pools.
+	// The Greenhouse bootstrap controller reads this to set cluster.spec.mode=Workerless.
+	workerlessAnnotation = "greenhouse.sap/workerless"
 )
 
 type ShootController struct {
@@ -233,10 +237,13 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Build secret annotations: start with any user-supplied additionalAnnotations,
 	// then overwrite with controller-reserved keys so they always take precedence.
-	secretAnnotations := make(map[string]string, len(r.CareInstruction.Spec.AdditionalAnnotations)+2)
+	secretAnnotations := make(map[string]string, len(r.CareInstruction.Spec.AdditionalAnnotations)+3)
 	maps.Copy(secretAnnotations, r.CareInstruction.Spec.AdditionalAnnotations)
 	secretAnnotations["greenhouse.sap/propagate-labels"] = strings.Join(labelKeysToPropagate, ",")
 	secretAnnotations[greenhouseapis.SecretAPIServerURLAnnotation] = apiServerURL
+	if len(shoot.Spec.Provider.Workers) == 0 {
+		secretAnnotations[workerlessAnnotation] = "true"
+	}
 
 	// create or update Secret with the CA data from the shoot
 	// and the labels from the CareInstruction
@@ -289,6 +296,10 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 		}
 		maps.Copy(secret.Annotations, secretAnnotations)
+		// Remove the workerless annotation when the shoot now has workers
+		if len(shoot.Spec.Provider.Workers) > 0 {
+			delete(secret.Annotations, workerlessAnnotation)
+		}
 		// Update tracking annotation with the current set of additionalAnnotations keys
 		managedKeys := make([]string, 0, len(r.CareInstruction.Spec.AdditionalAnnotations))
 		for k := range r.CareInstruction.Spec.AdditionalAnnotations {
