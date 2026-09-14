@@ -127,7 +127,7 @@ func StartControlPlane(port string) (*rest.Config, client.Client, *envtest.Envir
 
 	testEnv.CRDDirectoryPaths = []string{
 		// shoot-grafter.cloudoperators
-		filepath.Join("..", "..", "crd"),
+		filepath.Join("..", "..", "charts", "shoot-grafter", "crds"),
 		// crds needed in testing:
 		// clusters.greenhouse.sap
 		// and a representation of github.com/gardener/gardener/pkg/apis/core/v1beta1/shoot as CRD
