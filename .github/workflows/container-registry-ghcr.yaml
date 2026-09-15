@@ -10,7 +10,7 @@ name: Container Registry GHCR
 "on":
   push:
     tags:
-      - '*'
+      - 'v*.*.*'
   workflow_dispatch: {}
 permissions:
   contents: read
