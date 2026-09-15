@@ -41,7 +41,7 @@ endef
 .PHONY: generate
 generate: controller-gen
 	@printf "\e[1;36m>> controller-gen\e[0m\n"
-	"$(CONTROLLER_GEN)" crd rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=crd
+	"$(CONTROLLER_GEN)" crd rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=charts/shoot-grafter/crds
 	"$(CONTROLLER_GEN)" object paths="./..."
 	"$(CONTROLLER_GEN)" applyconfiguration paths="./..."
 
