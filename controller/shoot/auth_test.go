@@ -141,7 +141,8 @@ var _ = Describe("configureOIDCAuthentication", func() {
 		}
 		ctrl := makeAuthController("my-ci", []client.Object{greenhouseAuthCM}, []client.Object{shoot})
 
-		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shoot)).To(Succeed())
+		_, err := ctrl.ConfigureOIDCAuthentication(ctx, shoot)
+		Expect(err).NotTo(HaveOccurred())
 
 		var gardenCM corev1.ConfigMap
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
@@ -158,7 +159,8 @@ var _ = Describe("configureOIDCAuthentication", func() {
 		}
 		ctrl := makeAuthController("my-ci", []client.Object{greenhouseAuthCM}, []client.Object{shoot})
 
-		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shoot)).To(Succeed())
+		_, err := ctrl.ConfigureOIDCAuthentication(ctx, shoot)
+		Expect(err).NotTo(HaveOccurred())
 
 		var updatedShoot gardenerv1beta1.Shoot
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
@@ -173,7 +175,8 @@ var _ = Describe("configureOIDCAuthentication", func() {
 		}
 		ctrl := makeAuthController("ci-default", []client.Object{greenhouseAuthCM}, []client.Object{shoot})
 
-		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shoot)).To(Succeed())
+		_, err := ctrl.ConfigureOIDCAuthentication(ctx, shoot)
+		Expect(err).NotTo(HaveOccurred())
 
 		var gardenCM corev1.ConfigMap
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
@@ -212,7 +215,8 @@ jwt:
 		}
 		ctrl := makeAuthController("my-ci", []client.Object{greenhouseAuthCM}, []client.Object{existingCM, shoot})
 
-		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shoot)).To(Succeed())
+		_, err := ctrl.ConfigureOIDCAuthentication(ctx, shoot)
+		Expect(err).NotTo(HaveOccurred())
 
 		var gardenCM corev1.ConfigMap
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
@@ -267,7 +271,8 @@ jwt:
 
 		ctrl := makeAuthController("my-ci", []client.Object{updatedGreenhouseCM}, []client.Object{gardenCM, shoot})
 
-		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shoot)).To(Succeed())
+		_, err := ctrl.ConfigureOIDCAuthentication(ctx, shoot)
+		Expect(err).NotTo(HaveOccurred())
 
 		var result corev1.ConfigMap
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
@@ -335,7 +340,8 @@ jwt:
 			},
 		}
 
-		Expect(ctrl.ConfigureOIDCAuthentication(ctx, shootObj)).To(Succeed())
+		_, err := ctrl.ConfigureOIDCAuthentication(ctx, shootObj)
+		Expect(err).NotTo(HaveOccurred())
 
 		var result corev1.ConfigMap
 		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{
@@ -343,5 +349,24 @@ jwt:
 		}, &result)).To(Succeed())
 		// Garden CM name is unchanged; content reflects the new Greenhouse CM
 		Expect(result.Data["config.yaml"]).To(Equal(newGreenhouseCM.Data["config.yaml"]))
+	})
+
+	It("returns true on first call and false when nothing has changed on the second call", func() {
+		shoot := &gardenerv1beta1.Shoot{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-shoot", Namespace: "default"},
+		}
+		ctrl := makeAuthController("my-ci", []client.Object{greenhouseAuthCM}, []client.Object{shoot})
+
+		changed, err := ctrl.ConfigureOIDCAuthentication(ctx, shoot)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue(), "first call should report a change")
+
+		// Re-fetch the shoot so it carries the updated spec from the first call.
+		var updatedShoot gardenerv1beta1.Shoot
+		Expect(ctrl.GardenClient.Get(ctx, client.ObjectKey{Namespace: "default", Name: "my-shoot"}, &updatedShoot)).To(Succeed())
+
+		changed, err = ctrl.ConfigureOIDCAuthentication(ctx, &updatedShoot)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse(), "second call with nothing changed should report no change")
 	})
 })

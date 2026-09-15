@@ -138,4 +138,65 @@ var _ = Describe("Shoot Controller with fake client", func() {
 			Expect(secret.Data["greenhousekubeconfig"]).To(Equal([]byte("fake-kubeconfig")))
 		})
 	})
+
+	When("a CareInstruction has multiple AdditionalLabels", func() {
+		It("should produce a stable propagate-labels annotation across reconciles", func() {
+			s := authScheme()
+
+			ci := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{Name: "label-ci", Namespace: "default"},
+				Spec: v1alpha1.CareInstructionSpec{
+					AdditionalLabels: map[string]string{
+						"zzz-last":  "val-z",
+						"aaa-first": "val-a",
+					},
+				},
+			}
+
+			shootObj := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{Name: "label-shoot", Namespace: "default"},
+				Status: gardenerv1beta1.ShootStatus{
+					AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+						{Name: "external", URL: "https://api.label-shoot.example.com"},
+					},
+				},
+			}
+			caCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "label-shoot.ca-cluster", Namespace: "default"},
+				Data:       map[string]string{"ca.crt": "fake-ca"},
+			}
+
+			gardenClient := fake.NewClientBuilder().WithScheme(s).WithObjects(shootObj, caCM).Build()
+			greenhouseClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+			sc := &shoot.ShootController{
+				GreenhouseClient: greenhouseClient,
+				GardenClient:     gardenClient,
+				Logger:           logr.Discard(),
+				CareInstruction:  ci,
+				Name:             "label-test",
+			}
+
+			req := ctrl.Request{NamespacedName: client.ObjectKey{Name: "label-shoot", Namespace: "default"}}
+
+			// First reconcile — creates the Secret.
+			_, err := sc.Reconcile(test.Ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			var secretAfterFirst corev1.Secret
+			Expect(greenhouseClient.Get(test.Ctx, client.ObjectKey{Name: "label-shoot", Namespace: "default"}, &secretAfterFirst)).To(Succeed())
+			annotationAfterFirst := secretAfterFirst.Annotations["greenhouse.sap/propagate-labels"]
+
+			// Second reconcile — Secret must not be updated.
+			_, err = sc.Reconcile(test.Ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			var secretAfterSecond corev1.Secret
+			Expect(greenhouseClient.Get(test.Ctx, client.ObjectKey{Name: "label-shoot", Namespace: "default"}, &secretAfterSecond)).To(Succeed())
+			Expect(secretAfterSecond.Annotations["greenhouse.sap/propagate-labels"]).To(Equal(annotationAfterFirst),
+				"propagate-labels annotation must be identical on the second reconcile")
+			Expect(secretAfterSecond.ResourceVersion).To(Equal(secretAfterFirst.ResourceVersion),
+				"Secret must not be updated on the second reconcile")
+		})
+	})
 })
