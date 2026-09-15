@@ -12,9 +12,13 @@ import (
 	"shoot-grafter/internal/test"
 
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubectl/pkg/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -77,6 +81,61 @@ var _ = Describe("Shoot Controller with fake client", func() {
 
 			existingCluster := &greenhousev1alpha1.Cluster{}
 			Expect(test.K8sClient.Get(test.Ctx, client.ObjectKeyFromObject(cluster), existingCluster)).To(Succeed(), "should keep Cluster resource")
+		})
+	})
+
+	When("Greenhouse has already written a greenhousekubeconfig into the Secret", func() {
+		It("should not overwrite the greenhousekubeconfig key on subsequent reconciles", func() {
+			s := authScheme()
+
+			ci := &v1alpha1.CareInstruction{
+				ObjectMeta: metav1.ObjectMeta{Name: "kubeconfig-ci", Namespace: "default"},
+			}
+
+			shootObj := &gardenerv1beta1.Shoot{
+				ObjectMeta: metav1.ObjectMeta{Name: "kubeconfig-shoot", Namespace: "default"},
+				Status: gardenerv1beta1.ShootStatus{
+					AdvertisedAddresses: []gardenerv1beta1.ShootAdvertisedAddress{
+						{Name: "external", URL: "https://api.kubeconfig-shoot.example.com"},
+					},
+				},
+			}
+			caCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "kubeconfig-shoot.ca-cluster", Namespace: "default"},
+				Data:       map[string]string{"ca.crt": "fake-ca"},
+			}
+
+			gardenClient := fake.NewClientBuilder().WithScheme(s).WithObjects(shootObj, caCM).Build()
+			greenhouseClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+			sc := &shoot.ShootController{
+				GreenhouseClient: greenhouseClient,
+				GardenClient:     gardenClient,
+				Logger:           logr.Discard(),
+				CareInstruction:  ci,
+				Name:             "kubeconfig-test",
+			}
+
+			req := ctrl.Request{NamespacedName: client.ObjectKey{Name: "kubeconfig-shoot", Namespace: "default"}}
+
+			// First reconcile — creates the Secret with ca.crt only.
+			_, err := sc.Reconcile(test.Ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Simulate Greenhouse bootstrap controller writing greenhousekubeconfig.
+			var secret corev1.Secret
+			Expect(greenhouseClient.Get(test.Ctx, client.ObjectKey{Name: "kubeconfig-shoot", Namespace: "default"}, &secret)).To(Succeed())
+			secret.Data["greenhousekubeconfig"] = []byte("fake-kubeconfig")
+			Expect(greenhouseClient.Update(test.Ctx, &secret)).To(Succeed())
+
+			// Second reconcile — shoot-grafter must not destroy the greenhousekubeconfig key.
+			_, err = sc.Reconcile(test.Ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(greenhouseClient.Get(test.Ctx, client.ObjectKey{Name: "kubeconfig-shoot", Namespace: "default"}, &secret)).To(Succeed())
+			Expect(secret.Data).To(HaveKey("greenhousekubeconfig"),
+				"keys written by other controllers must survive a shoot-grafter reconcile")
+			Expect(secret.Data["greenhousekubeconfig"]).To(Equal([]byte("fake-kubeconfig")))
 		})
 	})
 })

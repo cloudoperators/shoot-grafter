@@ -273,9 +273,11 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	result, err := ctrl.CreateOrUpdate(ctx, r.GreenhouseClient, secret, func() error {
-		secret.Data = map[string][]byte{
-			"ca.crt": caDataBase64Enc,
+		// Merge into existing Data to preserve keys written by other controllers (e.g. Greenhouse's greenhousekubeconfig).
+		if secret.Data == nil {
+			secret.Data = make(map[string][]byte)
 		}
+		secret.Data["ca.crt"] = caDataBase64Enc
 		// Merge annotations - preserve existing ones and add/update ours
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
