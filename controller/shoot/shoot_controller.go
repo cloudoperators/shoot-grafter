@@ -214,15 +214,20 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
-	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
+	labelKeysToPropagate := append([]string(nil), r.CareInstruction.Spec.PropagateLabels...)
 
 	// Initialize secret labels based on CareInstruction
 	secretLabels := make(map[string]string)
 
 	// Get additional labels to set on the Secret
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
-		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
-			secretLabels[k] = v
+		additionalLabelKeys := make([]string, 0, len(r.CareInstruction.Spec.AdditionalLabels))
+		for k := range r.CareInstruction.Spec.AdditionalLabels {
+			additionalLabelKeys = append(additionalLabelKeys, k)
+		}
+		sort.Strings(additionalLabelKeys)
+		for _, k := range additionalLabelKeys {
+			secretLabels[k] = r.CareInstruction.Spec.AdditionalLabels[k]
 			labelKeysToPropagate = append(labelKeysToPropagate, k)
 		}
 	}
@@ -340,15 +345,18 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Configure OIDC authentication if AuthenticationConfigMapName is set
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
-		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
-		if err := r.ConfigureOIDCAuthentication(ctx, &shoot); err != nil {
+		changed, err := r.ConfigureOIDCAuthentication(ctx, &shoot)
+		if err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
 				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 			return ctrl.Result{}, err
 		}
-		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
-			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+		if changed {
+			r.Info("Configured OIDC authentication on Shoot", "name", shoot.Name)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
+				fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+		}
 	} else {
 		r.Info("No OIDC auth config found, skipping shoot auth config")
 	}
