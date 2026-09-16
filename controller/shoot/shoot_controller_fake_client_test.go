@@ -185,7 +185,10 @@ var _ = Describe("Shoot Controller with fake client", func() {
 
 			var secretAfterFirst corev1.Secret
 			Expect(greenhouseClient.Get(test.Ctx, client.ObjectKey{Name: "label-shoot", Namespace: "default"}, &secretAfterFirst)).To(Succeed())
-			annotationAfterFirst := secretAfterFirst.Annotations["greenhouse.sap/propagate-labels"]
+			// Keys are sorted AdditionalLabels first, then CareInstructionLabel appended last.
+			expectedAnnotation := "aaa-first,zzz-last," + v1alpha1.CareInstructionLabel
+			Expect(secretAfterFirst.Annotations["greenhouse.sap/propagate-labels"]).To(Equal(expectedAnnotation),
+				"propagate-labels annotation must be sorted")
 
 			// Second reconcile — Secret must not be updated.
 			_, err = sc.Reconcile(test.Ctx, req)
@@ -193,7 +196,7 @@ var _ = Describe("Shoot Controller with fake client", func() {
 
 			var secretAfterSecond corev1.Secret
 			Expect(greenhouseClient.Get(test.Ctx, client.ObjectKey{Name: "label-shoot", Namespace: "default"}, &secretAfterSecond)).To(Succeed())
-			Expect(secretAfterSecond.Annotations["greenhouse.sap/propagate-labels"]).To(Equal(annotationAfterFirst),
+			Expect(secretAfterSecond.Annotations["greenhouse.sap/propagate-labels"]).To(Equal(expectedAnnotation),
 				"propagate-labels annotation must be identical on the second reconcile")
 			Expect(secretAfterSecond.ResourceVersion).To(Equal(secretAfterFirst.ResourceVersion),
 				"Secret must not be updated on the second reconcile")
