@@ -10,6 +10,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"time"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/internal/clientutil"
@@ -319,7 +320,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// In this case, just requeue without emitting an event
 		if apierrors.IsConflict(err) || strings.Contains(err.Error(), "the object has been modified") {
 			r.Info("Secret was modified concurrently, requeuing", "name", shoot.Name)
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
 			fmt.Sprintf("Failed to create or update secret for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
