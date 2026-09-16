@@ -345,7 +345,6 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Configure OIDC authentication if AuthenticationConfigMapName is set
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
-		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
 		changed, err := r.ConfigureOIDCAuthentication(ctx, &shoot)
 		if err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
@@ -354,6 +353,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, err
 		}
 		if changed {
+			r.Info("Configured OIDC authentication on Shoot", "name", shoot.Name)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
 				fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
 		}
