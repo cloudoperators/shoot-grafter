@@ -60,8 +60,9 @@ func PredicateIgnoreAnnotationOnlyUpdates() predicate.Predicate {
 			}
 			oldCopy := oldShoot.DeepCopy()
 			newCopy := newShoot.DeepCopy()
-			oldCopy.Annotations = nil
-			newCopy.Annotations = nil
+			oldCopy.Annotations, newCopy.Annotations = nil, nil
+			oldCopy.ResourceVersion, newCopy.ResourceVersion = "", ""
+			oldCopy.ManagedFields, newCopy.ManagedFields = nil, nil
 			return !apiequality.Semantic.DeepEqual(oldCopy, newCopy)
 		},
 	}

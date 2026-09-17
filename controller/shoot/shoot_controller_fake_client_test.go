@@ -222,26 +222,38 @@ var _ = Describe("PredicateIgnoreAnnotationOnlyUpdates", func() {
 
 	It("drops update events where only annotations changed", func() {
 		oldObj := base.DeepCopy()
+		oldObj.ResourceVersion = "1"
+		oldObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-old"}}
 		newObj := base.DeepCopy()
 		newObj.Annotations = map[string]string{"gardener.cloud/operation": "reconcile"}
+		newObj.ResourceVersion = "2"
+		newObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-new"}}
 
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeFalse())
 	})
 
 	It("passes update events where spec changed", func() {
 		oldObj := base.DeepCopy()
+		oldObj.ResourceVersion = "1"
+		oldObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-old"}}
 		newObj := base.DeepCopy()
 		newObj.Spec.Region = "us-east-1"
+		newObj.ResourceVersion = "2"
+		newObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-new"}}
 
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
 
 	It("passes update events where status changed", func() {
 		oldObj := base.DeepCopy()
+		oldObj.ResourceVersion = "1"
+		oldObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-old"}}
 		newObj := base.DeepCopy()
 		newObj.Status.AdvertisedAddresses = []gardenerv1beta1.ShootAdvertisedAddress{
 			{Name: "external", URL: "https://api.example.com"},
 		}
+		newObj.ResourceVersion = "2"
+		newObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-new"}}
 
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
