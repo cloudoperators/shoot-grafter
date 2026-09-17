@@ -61,7 +61,7 @@ func (r *ShootController) emitEvent(object client.Object, eventType, reason, mes
 }
 
 func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
-	predicates := []predicate.Predicate{}
+	predicates := []predicate.Predicate{clientutil.PredicateIgnoreAnnotationOnlyUpdates()}
 
 	if r.CareInstruction.Spec.ShootSelector != nil && r.CareInstruction.Spec.ShootSelector.LabelSelector != nil {
 		labelPredicate, err := predicate.LabelSelectorPredicate(*r.CareInstruction.Spec.ShootSelector.LabelSelector)

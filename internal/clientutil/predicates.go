@@ -7,7 +7,9 @@ import (
 	"maps"
 	"slices"
 
+	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -44,5 +46,24 @@ func PredicateConfigMapDataChanged() predicate.Predicate {
 			return !maps.Equal(oldCM.Data, newCM.Data)
 		},
 		DeleteFunc: func(_ event.DeleteEvent) bool { return false },
+	}
+}
+
+// PredicateIgnoreAnnotationOnlyUpdates returns a predicate that passes all events except Shoot updates where only annotations changed.
+func PredicateIgnoreAnnotationOnlyUpdates() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldShoot, ok1 := e.ObjectOld.(*gardenerv1beta1.Shoot)
+			newShoot, ok2 := e.ObjectNew.(*gardenerv1beta1.Shoot)
+			if !ok1 || !ok2 {
+				return true
+			}
+			oldCopy := oldShoot.DeepCopy()
+			newCopy := newShoot.DeepCopy()
+			oldCopy.Annotations, newCopy.Annotations = nil, nil
+			oldCopy.ResourceVersion, newCopy.ResourceVersion = "", ""
+			oldCopy.ManagedFields, newCopy.ManagedFields = nil, nil
+			return !apiequality.Semantic.DeepEqual(oldCopy, newCopy)
+		},
 	}
 }
