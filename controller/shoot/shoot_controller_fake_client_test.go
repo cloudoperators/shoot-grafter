@@ -221,28 +221,28 @@ var _ = Describe("PredicateIgnoreAnnotationOnlyUpdates", func() {
 	p := clientutil.PredicateIgnoreAnnotationOnlyUpdates()
 
 	It("drops update events where only annotations changed", func() {
-		old := base.DeepCopy()
-		new := base.DeepCopy()
-		new.Annotations = map[string]string{"gardener.cloud/operation": "reconcile"}
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Annotations = map[string]string{"gardener.cloud/operation": "reconcile"}
 
-		Expect(p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})).To(BeFalse())
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeFalse())
 	})
 
 	It("passes update events where spec changed", func() {
-		old := base.DeepCopy()
-		new := base.DeepCopy()
-		new.Spec.Region = "us-east-1"
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Spec.Region = "us-east-1"
 
-		Expect(p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})).To(BeTrue())
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
 
 	It("passes update events where status changed", func() {
-		old := base.DeepCopy()
-		new := base.DeepCopy()
-		new.Status.AdvertisedAddresses = []gardenerv1beta1.ShootAdvertisedAddress{
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Status.AdvertisedAddresses = []gardenerv1beta1.ShootAdvertisedAddress{
 			{Name: "external", URL: "https://api.example.com"},
 		}
 
-		Expect(p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})).To(BeTrue())
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
 })
