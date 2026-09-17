@@ -9,6 +9,7 @@ import (
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
+	"shoot-grafter/internal/clientutil"
 	"shoot-grafter/internal/test"
 
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -23,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 var _ = Describe("Shoot Controller with fake client", func() {
@@ -201,5 +203,46 @@ var _ = Describe("Shoot Controller with fake client", func() {
 			Expect(secretAfterSecond.ResourceVersion).To(Equal(secretAfterFirst.ResourceVersion),
 				"Secret must not be updated on the second reconcile")
 		})
+	})
+})
+
+var _ = Describe("PredicateIgnoreAnnotationOnlyUpdates", func() {
+	base := &gardenerv1beta1.Shoot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-shoot",
+			Namespace: "default",
+			Labels:    map[string]string{"env": "prod"},
+		},
+		Spec: gardenerv1beta1.ShootSpec{
+			Region: "eu-de-1",
+		},
+	}
+
+	p := clientutil.PredicateIgnoreAnnotationOnlyUpdates()
+
+	It("drops update events where only annotations changed", func() {
+		old := base.DeepCopy()
+		new := base.DeepCopy()
+		new.Annotations = map[string]string{"gardener.cloud/operation": "reconcile"}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})).To(BeFalse())
+	})
+
+	It("passes update events where spec changed", func() {
+		old := base.DeepCopy()
+		new := base.DeepCopy()
+		new.Spec.Region = "us-east-1"
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})).To(BeTrue())
+	})
+
+	It("passes update events where status changed", func() {
+		old := base.DeepCopy()
+		new := base.DeepCopy()
+		new.Status.AdvertisedAddresses = []gardenerv1beta1.ShootAdvertisedAddress{
+			{Name: "external", URL: "https://api.example.com"},
+		}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})).To(BeTrue())
 	})
 })
