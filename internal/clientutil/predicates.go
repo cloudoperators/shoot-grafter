@@ -49,8 +49,9 @@ func PredicateConfigMapDataChanged() predicate.Predicate {
 	}
 }
 
-// PredicateIgnoreAnnotationOnlyUpdates returns a predicate that passes all events except Shoot updates where only annotations changed.
-func PredicateIgnoreAnnotationOnlyUpdates() predicate.Predicate {
+// PredicateShootStatusNoise drops Shoot update events that are pure Gardener status noise:
+// events where nothing changed except status fields other than AdvertisedAddresses.
+func PredicateShootStatusNoise() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			oldShoot, ok1 := e.ObjectOld.(*gardenerv1beta1.Shoot)
@@ -58,12 +59,19 @@ func PredicateIgnoreAnnotationOnlyUpdates() predicate.Predicate {
 			if !ok1 || !ok2 {
 				return true
 			}
-			oldCopy := oldShoot.DeepCopy()
-			newCopy := newShoot.DeepCopy()
-			oldCopy.Annotations, newCopy.Annotations = nil, nil
-			oldCopy.ResourceVersion, newCopy.ResourceVersion = "", ""
-			oldCopy.ManagedFields, newCopy.ManagedFields = nil, nil
-			return !apiequality.Semantic.DeepEqual(oldCopy, newCopy)
+			// Pass if metadata changed (spec, labels, annotations, generation, etc.)
+			if oldShoot.Generation != newShoot.Generation ||
+				!apiequality.Semantic.DeepEqual(oldShoot.Spec, newShoot.Spec) ||
+				!apiequality.Semantic.DeepEqual(oldShoot.Labels, newShoot.Labels) ||
+				!apiequality.Semantic.DeepEqual(oldShoot.Annotations, newShoot.Annotations) {
+				return true
+			}
+			// Pass if AdvertisedAddresses changed (the API server URL lives there).
+			if !apiequality.Semantic.DeepEqual(oldShoot.Status.AdvertisedAddresses, newShoot.Status.AdvertisedAddresses) {
+				return true
+			}
+			// Drop all other status-only changes.
+			return false
 		},
 	}
 }

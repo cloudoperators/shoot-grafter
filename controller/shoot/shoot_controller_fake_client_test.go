@@ -206,54 +206,70 @@ var _ = Describe("Shoot Controller with fake client", func() {
 	})
 })
 
-var _ = Describe("PredicateIgnoreAnnotationOnlyUpdates", func() {
+var _ = Describe("PredicateShootStatusNoise", func() {
 	base := &gardenerv1beta1.Shoot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-shoot",
-			Namespace: "default",
-			Labels:    map[string]string{"env": "prod"},
+			Name:       "test-shoot",
+			Namespace:  "default",
+			Generation: 1,
+			Labels:     map[string]string{"env": "prod"},
 		},
 		Spec: gardenerv1beta1.ShootSpec{
 			Region: "eu-de-1",
 		},
 	}
 
-	p := clientutil.PredicateIgnoreAnnotationOnlyUpdates()
+	p := clientutil.PredicateShootStatusNoise()
 
-	It("drops update events where only annotations changed", func() {
+	It("drops status-only updates (LastOperation noise)", func() {
 		oldObj := base.DeepCopy()
-		oldObj.ResourceVersion = "1"
-		oldObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-old"}}
 		newObj := base.DeepCopy()
-		newObj.Annotations = map[string]string{"gardener.cloud/operation": "reconcile"}
-		newObj.ResourceVersion = "2"
-		newObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-new"}}
+		newObj.Status.LastOperation = &gardenerv1beta1.LastOperation{
+			Description: "Reconciliation of Shoot cluster initialized.",
+			Progress:    42,
+		}
 
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeFalse())
 	})
 
-	It("passes update events where spec changed", func() {
+	It("passes updates where AdvertisedAddresses changed", func() {
 		oldObj := base.DeepCopy()
-		oldObj.ResourceVersion = "1"
-		oldObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-old"}}
-		newObj := base.DeepCopy()
-		newObj.Spec.Region = "us-east-1"
-		newObj.ResourceVersion = "2"
-		newObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-new"}}
-
-		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
-	})
-
-	It("passes update events where status changed", func() {
-		oldObj := base.DeepCopy()
-		oldObj.ResourceVersion = "1"
-		oldObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-old"}}
 		newObj := base.DeepCopy()
 		newObj.Status.AdvertisedAddresses = []gardenerv1beta1.ShootAdvertisedAddress{
 			{Name: "external", URL: "https://api.example.com"},
 		}
-		newObj.ResourceVersion = "2"
-		newObj.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test-new"}}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where Generation changed (spec or operation annotation write)", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Generation = 2
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where spec changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Spec.Region = "us-east-1"
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where labels changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Labels["new-label"] = "value"
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where annotations changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Annotations = map[string]string{"some-annotation": "value"}
 
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
