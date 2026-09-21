@@ -242,7 +242,7 @@ var _ = Describe("PredicateShootStatusNoise", func() {
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
 
-	It("passes updates where Generation changed (spec or operation annotation write)", func() {
+	It("passes updates where Generation changed", func() {
 		oldObj := base.DeepCopy()
 		newObj := base.DeepCopy()
 		newObj.Generation = 2

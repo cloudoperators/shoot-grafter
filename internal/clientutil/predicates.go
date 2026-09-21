@@ -59,7 +59,7 @@ func PredicateShootStatusNoise() predicate.Predicate {
 			if !ok1 || !ok2 {
 				return true
 			}
-			// Pass if metadata changed (spec, labels, annotations, generation, etc.)
+			// Pass if non-status fields changed (Generation/Spec/labels/annotations).
 			if oldShoot.Generation != newShoot.Generation ||
 				!apiequality.Semantic.DeepEqual(oldShoot.Spec, newShoot.Spec) ||
 				!apiequality.Semantic.DeepEqual(oldShoot.Labels, newShoot.Labels) ||
