@@ -590,7 +590,7 @@ var _ = Describe("Shoot Controller", func() {
 			),
 		)
 
-		It("should remove workerless annotation when shoot gains workers", func() {
+		It("should remove workerless annotation from a stale secret when a new shoot of the same name has workers", func() {
 			// Pre-create a Secret with the workerless annotation (simulating a formerly workerless shoot)
 			existingSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
@@ -658,7 +658,7 @@ var _ = Describe("Shoot Controller", func() {
 					Namespace: "default",
 				}, secret)).To(Succeed())
 				g.Expect(secret.Annotations).NotTo(HaveKey("greenhouse.sap/workerless"),
-					"workerless annotation should be removed when shoot has workers")
+					"stale workerless annotation should be removed when shoot has workers")
 			}).Should(Succeed(), "should eventually remove workerless annotation")
 		})
 

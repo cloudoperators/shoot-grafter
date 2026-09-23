@@ -235,13 +235,15 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	secretLabels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
 	labelKeysToPropagate = append(labelKeysToPropagate, v1alpha1.CareInstructionLabel)
 
+	isWorkerless := len(shoot.Spec.Provider.Workers) == 0
+
 	// Build secret annotations: start with any user-supplied additionalAnnotations,
 	// then overwrite with controller-reserved keys so they always take precedence.
 	secretAnnotations := make(map[string]string, len(r.CareInstruction.Spec.AdditionalAnnotations)+3)
 	maps.Copy(secretAnnotations, r.CareInstruction.Spec.AdditionalAnnotations)
 	secretAnnotations["greenhouse.sap/propagate-labels"] = strings.Join(labelKeysToPropagate, ",")
 	secretAnnotations[greenhouseapis.SecretAPIServerURLAnnotation] = apiServerURL
-	if len(shoot.Spec.Provider.Workers) == 0 {
+	if isWorkerless {
 		secretAnnotations[workerlessAnnotation] = "true"
 	}
 
@@ -296,8 +298,9 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 		}
 		maps.Copy(secret.Annotations, secretAnnotations)
-		// Remove the workerless annotation when the shoot now has workers
-		if len(shoot.Spec.Provider.Workers) > 0 {
+		// maps.Copy only adds/updates keys, so explicitly remove a stale workerless annotation
+		// (left over from a deleted workerless shoot of the same name) when the current shoot has workers.
+		if !isWorkerless {
 			delete(secret.Annotations, workerlessAnnotation)
 		}
 		// Update tracking annotation with the current set of additionalAnnotations keys
