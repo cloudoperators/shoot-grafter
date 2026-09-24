@@ -64,6 +64,7 @@ type careInstructionContextKey struct{}
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch;delete
 //+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;delete
@@ -241,7 +242,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	// 2. If the manager could not be created, we need to recreate the client and manager
 	shootControllerStarted := careInstruction.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition).IsTrue()
 	// 3. If the created config is different to the existing one, we need to recreate the client and manager
-	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
+	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
 	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
 	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
@@ -296,14 +297,14 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 
 	// Create a new client for the garden cluster
-	gardenClient, err := client.New(&gardenClientConfig, client.Options{Scheme: scheme})
+	gardenClient, err := client.New(gardenClientConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		return err
 	}
 	r.Info("Successfully created client for garden cluster", "name", careInstruction.Spec.GardenClusterName)
 
 	skipNameValidation := true
-	shootControllerMgr, err := ctrl.NewManager(&gardenClientConfig, ctrl.Options{
+	shootControllerMgr, err := ctrl.NewManager(gardenClientConfig, ctrl.Options{
 		Scheme: scheme,
 		Cache: cache.Options{
 			// Only watch the namespace specified in the CareInstruction
@@ -359,7 +360,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 
 	// Update garden state (with write lock)
 	r.gardensMu.Lock()
-	r.gardens[gardenKey].gardenConfig = &gardenClientConfig
+	r.gardens[gardenKey].gardenConfig = gardenClientConfig
 	r.gardens[gardenKey].gardenClient = &gardenClient
 	r.gardens[gardenKey].mgr = shootControllerMgr
 	r.gardens[gardenKey].cancelFunc = cancel

@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/cloudoperators/greenhouse/pkg/lifecycle"
+
 	"shoot-grafter/api/v1alpha1"
 
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -20,52 +22,51 @@ import (
 )
 
 // GetGardenClusterAccess retrieves the rest.Config and scheme for the garden cluster. We do not return a client.Client here, since we build a manager later.
-func (r *CareInstructionReconciler) GetGardenClusterAccess(ctx context.Context, careInstruction *v1alpha1.CareInstruction) (rest.Config, *runtime.Scheme, error) {
-	gardenCluster := greenhousev1alpha1.Cluster{}
+func (r *CareInstructionReconciler) GetGardenClusterAccess(ctx context.Context, careInstruction *v1alpha1.CareInstruction) (*rest.Config, *runtime.Scheme, error) {
+	gardenCluster := &greenhousev1alpha1.Cluster{}
 	var (
 		exists           bool
 		gardenKubeConfig []byte
+		cfg              *rest.Config
 	)
 
 	// If GardenClusterKubeConfigSecretName is provided, use it to get the kubeconfig
 	if careInstruction.Spec.GardenClusterKubeConfigSecretName.Name != "" {
 		gardenClusterSecret := corev1.Secret{}
-		if err := r.Get(ctx, client.ObjectKey{Name: careInstruction.Spec.GardenClusterKubeConfigSecretName.Name, Namespace: careInstruction.Namespace}, &gardenClusterSecret); err != nil {
-			return rest.Config{}, nil, err
+		err := r.Get(ctx, client.ObjectKey{Name: careInstruction.Spec.GardenClusterKubeConfigSecretName.Name, Namespace: careInstruction.Namespace}, &gardenClusterSecret)
+		if err != nil {
+			return nil, nil, err
 		}
 		gardenKubeConfig, exists = gardenClusterSecret.Data[careInstruction.Spec.GardenClusterKubeConfigSecretName.Key]
 		if !exists {
-			return rest.Config{}, nil, errors.New("kubeconfig not found in gardenCluster secret")
+			return nil, nil, errors.New("kubeconfig not found in gardenCluster secret")
+		}
+		cfg, err = clientcmd.RESTConfigFromKubeConfig(gardenKubeConfig)
+		if err != nil {
+			return nil, nil, err
 		}
 	} else { // else use GardenClusterName to get the greenhouse Cluster resource
-		if err := r.Get(ctx, client.ObjectKey{Name: careInstruction.Spec.GardenClusterName, Namespace: careInstruction.Namespace}, &gardenCluster); err != nil {
-			return rest.Config{}, nil, err
+		err := r.Get(ctx, client.ObjectKey{Name: careInstruction.Spec.GardenClusterName, Namespace: careInstruction.Namespace}, gardenCluster)
+		if err != nil {
+			return nil, nil, err
 		}
 		if !gardenCluster.Status.IsReadyTrue() {
-			return rest.Config{}, nil, errors.New("GardenCluster is not ready")
+			return nil, nil, errors.New("GardenCluster is not ready")
 		}
-		gardenClusterSecret := corev1.Secret{}
-		if err := r.Get(ctx, client.ObjectKey{Name: gardenCluster.Name, Namespace: careInstruction.Namespace}, &gardenClusterSecret); err != nil {
-			return rest.Config{}, nil, err
+		cfg, err = lifecycle.NewRemoteKubeCfg(ctx, r.Client, gardenCluster)
+		if err != nil {
+			return nil, nil, err
 		}
-		gardenKubeConfig, exists = gardenClusterSecret.Data["greenhousekubeconfig"]
-		if !exists {
-			return rest.Config{}, nil, errors.New("kubeconfig not found in gardenCluster secret")
-		}
-	}
-	gardenClientConfig, err := clientcmd.RESTConfigFromKubeConfig(gardenKubeConfig)
-	if err != nil {
-		return rest.Config{}, nil, err
 	}
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
-		return *gardenClientConfig, nil, err
+		return cfg, nil, err
 	}
 	if err := gardenerv1beta1.AddToScheme(scheme); err != nil {
-		return *gardenClientConfig, nil, err
+		return cfg, nil, err
 	}
 	if err := gardenerAuthenticationv1alpha1.AddToScheme(scheme); err != nil {
-		return *gardenClientConfig, nil, err
+		return cfg, nil, err
 	}
-	return *gardenClientConfig, scheme, nil
+	return cfg, scheme, nil
 }

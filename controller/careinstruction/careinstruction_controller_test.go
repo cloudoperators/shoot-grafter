@@ -540,6 +540,7 @@ var _ = Describe("CareInstruction Controller", func() {
 				Data: map[string][]byte{
 					greenhouseapis.GreenHouseKubeConfigKey: test.KubeConfig,
 				},
+				Type: greenhouseapis.SecretTypeKubeConfig,
 			}
 			Expect(test.K8sClient.Create(test.Ctx, gardenClusterSecret)).To(Succeed(), "should create garden cluster secret")
 			Eventually(func(g Gomega) bool {
