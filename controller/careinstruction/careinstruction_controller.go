@@ -242,7 +242,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	// 2. If the manager could not be created, we need to recreate the client and manager
 	shootControllerStarted := careInstruction.Status.GetConditionByType(v1alpha1.ShootControllerStartedCondition).IsTrue()
 	// 3. If the created config is different to the existing one, we need to recreate the client and manager
-	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, &gardenClientConfig)
+	gardenConfigChanged := !reflect.DeepEqual(garden.gardenConfig, gardenClientConfig)
 	// 4. If the CareInstruction.Spec has changed, we need to recreate the client and manager
 	careInstructionSpecChanged := !reflect.DeepEqual(*garden.careInstructionSpec, careInstruction.Spec)
 	// 5. This is a safeguard: if the stop channel is nil or closed, we need to recreate the manager
