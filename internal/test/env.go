@@ -101,6 +101,7 @@ var (
 			Data: map[string][]byte{
 				greenhouseapis.GreenHouseKubeConfigKey: GardenKubeConfig,
 			},
+			Type: greenhouseapis.SecretTypeKubeConfig,
 		}
 		Expect(K8sClient.Create(Ctx, gardenClusterSecret)).To(Succeed(), "should create garden cluster secret")
 
