@@ -32,6 +32,12 @@ rules:
   - watch
 - apiGroups:
   - ""
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
+- apiGroups:
+  - ""
   - events.k8s.io
   resources:
   - events
