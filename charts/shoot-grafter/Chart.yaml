@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+description: Automatic onboarding of Gardener Shoots to Greenhouse
+type: application
+name: shoot-grafter
+version: 0.6.2
+appVersion: "v0.5.2"
+keywords:
+- operator
+- gardener
+- greenhouse
+maintainers:
+  - name: uwe-mayer
+  - name: abhijith-darshan
+  - name: mikolajkucinski
+  - name: Zaggy21
+  - name: jellonek

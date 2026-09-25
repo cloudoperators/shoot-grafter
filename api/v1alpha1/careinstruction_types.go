@@ -144,7 +144,7 @@ type CareInstructionStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ci
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="SeedCluster",type="string",JSONPath=".spec.seedClusterName"
+// +kubebuilder:printcolumn:name="GardenCluster",type="string",JSONPath=".spec.gardenClusterName"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=`.status.statusConditions.conditions[?(@.type == "Ready")].status`
 type CareInstruction struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"time"
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/internal/clientutil"
@@ -64,7 +65,7 @@ func (r *ShootController) emitEvent(object client.Object, eventType, reason, mes
 }
 
 func (r *ShootController) SetupWithManager(mgr ctrl.Manager) error {
-	predicates := []predicate.Predicate{}
+	predicates := []predicate.Predicate{clientutil.PredicateShootStatusNoise()}
 
 	if r.CareInstruction.Spec.ShootSelector != nil && r.CareInstruction.Spec.ShootSelector.LabelSelector != nil {
 		labelPredicate, err := predicate.LabelSelectorPredicate(*r.CareInstruction.Spec.ShootSelector.LabelSelector)
@@ -218,15 +219,20 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Specify which labels should be propagated from the Secret (by Greenhouse to create Cluster)
-	labelKeysToPropagate := r.CareInstruction.Spec.PropagateLabels
+	labelKeysToPropagate := append([]string(nil), r.CareInstruction.Spec.PropagateLabels...)
 
 	// Initialize secret labels based on CareInstruction
 	secretLabels := make(map[string]string)
 
 	// Get additional labels to set on the Secret
 	if r.CareInstruction.Spec.AdditionalLabels != nil {
-		for k, v := range r.CareInstruction.Spec.AdditionalLabels {
-			secretLabels[k] = v
+		additionalLabelKeys := make([]string, 0, len(r.CareInstruction.Spec.AdditionalLabels))
+		for k := range r.CareInstruction.Spec.AdditionalLabels {
+			additionalLabelKeys = append(additionalLabelKeys, k)
+		}
+		sort.Strings(additionalLabelKeys)
+		for _, k := range additionalLabelKeys {
+			secretLabels[k] = r.CareInstruction.Spec.AdditionalLabels[k]
 			labelKeysToPropagate = append(labelKeysToPropagate, k)
 		}
 	}
@@ -282,9 +288,11 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	result, err := ctrl.CreateOrUpdate(ctx, r.GreenhouseClient, secret, func() error {
-		secret.Data = map[string][]byte{
-			"ca.crt": caDataBase64Enc,
+		// Merge into existing Data to preserve keys written by other controllers (e.g. Greenhouse's greenhousekubeconfig).
+		if secret.Data == nil {
+			secret.Data = make(map[string][]byte)
 		}
+		secret.Data["ca.crt"] = caDataBase64Enc
 		// Merge annotations - preserve existing ones and add/update ours
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
@@ -326,7 +334,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// In this case, just requeue without emitting an event
 		if apierrors.IsConflict(err) || strings.Contains(err.Error(), "the object has been modified") {
 			r.Info("Secret was modified concurrently, requeuing", "name", shoot.Name)
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 		r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "SecretOperationFailed",
 			fmt.Sprintf("Failed to create or update secret for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
@@ -352,15 +360,18 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Configure OIDC authentication if AuthenticationConfigMapName is set
 	// Do this before RBAC setup so RBAC errors don't prevent OIDC configuration
 	if r.CareInstruction.Spec.AuthenticationConfigMapName != "" {
-		r.Info("Found OIDC auth config, configuring on Shoot", "name", shoot.Name)
-		if err := r.ConfigureOIDCAuthentication(ctx, &shoot); err != nil {
+		changed, err := r.ConfigureOIDCAuthentication(ctx, &shoot)
+		if err != nil {
 			r.Info("failed to configure OIDC authentication for Shoot", "name", shoot.Name, "error", err)
 			r.emitEvent(r.CareInstruction, corev1.EventTypeWarning, "OIDCConfigurationFailed",
 				fmt.Sprintf("Failed to configure OIDC authentication for shoot %s/%s: %v", shoot.Namespace, shoot.Name, err))
 			return ctrl.Result{}, err
 		}
-		r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
-			fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+		if changed {
+			r.Info("Configured OIDC authentication on Shoot", "name", shoot.Name)
+			r.emitEvent(r.CareInstruction, corev1.EventTypeNormal, "OIDCConfigured",
+				fmt.Sprintf("Successfully configured OIDC authentication for shoot %s/%s", shoot.Namespace, shoot.Name))
+		}
 	} else {
 		r.Info("No OIDC auth config found, skipping shoot auth config")
 	}

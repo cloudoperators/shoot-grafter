@@ -26,14 +26,16 @@ const (
 // 1. Reading the AuthenticationConfiguration from the Greenhouse auth ConfigMap
 // 2. Writing it verbatim to a ConfigMap in the Garden cluster (always overwrite)
 // 3. Updating the Shoot spec to reference that ConfigMap
-func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) error {
+//
+// Returns true if any change was made (ConfigMap created/updated or Shoot spec updated).
+func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot *gardenerv1beta1.Shoot) (bool, error) {
 	// Fetch the Greenhouse auth ConfigMap and ensure it carries the watch label.
 	var greenhouseAuthConfigMap corev1.ConfigMap
 	if err := r.GreenhouseClient.Get(ctx, client.ObjectKey{
 		Namespace: r.CareInstruction.Namespace,
 		Name:      r.CareInstruction.Spec.AuthenticationConfigMapName,
 	}, &greenhouseAuthConfigMap); err != nil {
-		return fmt.Errorf("failed to fetch AuthenticationConfiguration ConfigMap %s from Greenhouse cluster: %w",
+		return false, fmt.Errorf("failed to fetch AuthenticationConfiguration ConfigMap %s from Greenhouse cluster: %w",
 			r.CareInstruction.Spec.AuthenticationConfigMapName, err)
 	}
 
@@ -49,7 +51,7 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 	}
 
 	if greenhouseAuthConfigMap.Data == nil || greenhouseAuthConfigMap.Data[authConfigMapKey] == "" {
-		return fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain %s key",
+		return false, fmt.Errorf("AuthenticationConfiguration ConfigMap %s does not contain %s key",
 			r.CareInstruction.Spec.AuthenticationConfigMapName, authConfigMapKey)
 	}
 
@@ -86,7 +88,7 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create/update AuthenticationConfiguration ConfigMap: %w", err)
+		return false, fmt.Errorf("failed to create/update AuthenticationConfiguration ConfigMap: %w", err)
 	}
 
 	switch configMapResult {
@@ -104,7 +106,7 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 		}
 		shoot.Labels[v1alpha1.CareInstructionLabel] = r.CareInstruction.Name
 		if patchErr := r.GardenClient.Patch(ctx, shoot, client.MergeFrom(shootBase)); patchErr != nil {
-			return fmt.Errorf("failed to patch careinstruction label on Shoot: %w", patchErr)
+			return false, fmt.Errorf("failed to patch careinstruction label on Shoot: %w", patchErr)
 		}
 	}
 
@@ -125,22 +127,23 @@ func (r *ShootController) ConfigureOIDCAuthentication(ctx context.Context, shoot
 
 	if shootNeedsUpdate {
 		if err := r.GardenClient.Update(ctx, shoot); err != nil {
-			return fmt.Errorf("failed to update Shoot spec with OIDC authentication ConfigMap reference: %w", err)
+			return false, fmt.Errorf("failed to update Shoot spec with OIDC authentication ConfigMap reference: %w", err)
 		}
 		r.Info("Updated Shoot spec with OIDC configuration", "shoot", shoot.Name, "configMap", configMapName)
-		return nil // Spec change triggers reconciliation automatically
+		return true, nil // Spec change triggers reconciliation automatically
 	}
 
 	// Trigger Shoot reconciliation if ConfigMap was created or updated.
 	// Reference: https://gardener.cloud/docs/gardener/shoot-operations/shoot_operations/#immediate-reconciliation
 	if configMapResult != controllerutil.OperationResultNone {
 		if err := AnnotateShootForReconcile(ctx, r.GardenClient, shoot.Namespace, shoot.Name); err != nil {
-			return fmt.Errorf("failed to annotate Shoot for reconciliation: %w", err)
+			return false, fmt.Errorf("failed to annotate Shoot for reconciliation: %w", err)
 		}
 		r.Info("Annotated Shoot for reconciliation due to ConfigMap change",
 			"shoot", shoot.Name,
 			"configMap", configMapName)
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }

@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company
+# SPDX-License-Identifier: Apache-2.0
+
+name: Helm Chart Publish
+
+on:
+  push:
+    tags:
+      - "helm-chart-*.*.*"
+    paths:
+        - 'charts/**'
+
+jobs:
+  helm:
+    name: Package and push chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup Kube Tools
+        uses: yokawasa/action-setup-kube-tools@b16d49b2c459d33cf9d4c300a220ef0bcdbc730a # v0.14.0
+        with:
+          helm: "4.2.2"
+          yq: "4.53.3"
+          setup-tools: |
+            helm
+            yq
+
+      - name: Log in to container registry
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check chart version does not already exist
+        id: check
+        env:
+          REGISTRY: ghcr.io
+        run: |
+          CHART_DIR=charts/shoot-grafter
+          CHART_VERSION=$(yq '.version' "$CHART_DIR/Chart.yaml")
+          CHART_NAME=$(yq '.name' "$CHART_DIR/Chart.yaml")
+          echo "chart_version=${CHART_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "chart_name=${CHART_NAME}" >> "$GITHUB_OUTPUT"
+          if helm pull "oci://${REGISTRY}/${{ github.repository }}/charts/${CHART_NAME}" --version "${CHART_VERSION}" 2>/dev/null; then
+            echo "ERROR: chart ${CHART_NAME}:${CHART_VERSION} already exists in OCI registry — bump Chart.yaml version before tagging"
+            exit 1
+          fi
+
+      - name: Package and push Helm chart to GHCR
+        env:
+          REGISTRY: ghcr.io
+        run: |
+          CHART_DIR=charts/shoot-grafter
+          APP_VERSION=$(yq '.appVersion' "$CHART_DIR/Chart.yaml")
+
+          echo "Packaging chart ${{ steps.check.outputs.chart_name }} version ${{ steps.check.outputs.chart_version }} (appVersion $APP_VERSION)"
+          helm package "$CHART_DIR"
+
+          echo "Pushing chart to $REGISTRY"
+          helm push "${{ steps.check.outputs.chart_name }}-${{ steps.check.outputs.chart_version }}.tgz" "oci://${REGISTRY}/${{ github.repository }}/charts"
