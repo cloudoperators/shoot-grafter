@@ -9,6 +9,7 @@ import (
 
 	"shoot-grafter/api/v1alpha1"
 	"shoot-grafter/controller/shoot"
+	"shoot-grafter/internal/clientutil"
 	"shoot-grafter/internal/test"
 
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
@@ -23,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 var _ = Describe("Shoot Controller with fake client", func() {
@@ -201,5 +203,74 @@ var _ = Describe("Shoot Controller with fake client", func() {
 			Expect(secretAfterSecond.ResourceVersion).To(Equal(secretAfterFirst.ResourceVersion),
 				"Secret must not be updated on the second reconcile")
 		})
+	})
+})
+
+var _ = Describe("PredicateShootStatusNoise", func() {
+	base := &gardenerv1beta1.Shoot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-shoot",
+			Namespace:  "default",
+			Generation: 1,
+			Labels:     map[string]string{"env": "prod"},
+		},
+		Spec: gardenerv1beta1.ShootSpec{
+			Region: "eu-de-1",
+		},
+	}
+
+	p := clientutil.PredicateShootStatusNoise()
+
+	It("drops status-only updates (LastOperation noise)", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Status.LastOperation = &gardenerv1beta1.LastOperation{
+			Description: "Reconciliation of Shoot cluster initialized.",
+			Progress:    42,
+		}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeFalse())
+	})
+
+	It("passes updates where AdvertisedAddresses changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Status.AdvertisedAddresses = []gardenerv1beta1.ShootAdvertisedAddress{
+			{Name: "external", URL: "https://api.example.com"},
+		}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where Generation changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Generation = 2
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where spec changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Spec.Region = "us-east-1"
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where labels changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Labels["new-label"] = "value"
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("passes updates where annotations changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		newObj.Annotations = map[string]string{"some-annotation": "value"}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
 })
