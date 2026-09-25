@@ -40,10 +40,6 @@ const (
 	// managedAnnotationKeysAnnotation tracks which annotation keys are managed by additionalAnnotations
 	// so stale keys can be removed when they are removed from the spec.
 	managedAnnotationKeysAnnotation = "shoot-grafter.cloudoperators.dev/managed-annotation-keys"
-
-	// workerlessAnnotation is set on the cluster secret when the shoot has no worker pools.
-	// The Greenhouse bootstrap controller reads this to set cluster.spec.mode=Workerless.
-	workerlessAnnotation = "greenhouse.sap/workerless"
 )
 
 type ShootController struct {
@@ -250,7 +246,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	secretAnnotations["greenhouse.sap/propagate-labels"] = strings.Join(labelKeysToPropagate, ",")
 	secretAnnotations[greenhouseapis.SecretAPIServerURLAnnotation] = apiServerURL
 	if isWorkerless {
-		secretAnnotations[workerlessAnnotation] = "true"
+		secretAnnotations[greenhouseapis.ClusterWorkerlessAnnotation] = "true"
 	}
 
 	// create or update Secret with the CA data from the shoot
@@ -309,7 +305,7 @@ func (r *ShootController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// maps.Copy only adds/updates keys, so explicitly remove a stale workerless annotation
 		// (left over from a deleted workerless shoot of the same name) when the current shoot has workers.
 		if !isWorkerless {
-			delete(secret.Annotations, workerlessAnnotation)
+			delete(secret.Annotations, greenhouseapis.ClusterWorkerlessAnnotation)
 		}
 		// Update tracking annotation with the current set of additionalAnnotations keys
 		managedKeys := make([]string, 0, len(r.CareInstruction.Spec.AdditionalAnnotations))

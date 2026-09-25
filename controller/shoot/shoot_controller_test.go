@@ -578,7 +578,7 @@ var _ = Describe("Shoot Controller", func() {
 							"greenhouse.sap/propagate-labels":                          "foo,baz,quux,shoot-grafter.cloudoperators.dev/careinstruction",
 							greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-workerless.example.com",
 							"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
-							"greenhouse.sap/workerless":                                "true",
+							greenhouseapis.ClusterWorkerlessAnnotation:                 "true",
 						},
 					},
 					Data: map[string][]byte{
@@ -600,7 +600,7 @@ var _ = Describe("Shoot Controller", func() {
 						"greenhouse.sap/propagate-labels":                          "shoot-grafter.cloudoperators.dev/careinstruction",
 						greenhouseapis.SecretAPIServerURLAnnotation:                "https://api-server.test-shoot-gain-workers.example.com",
 						"shoot-grafter.cloudoperators.dev/managed-annotation-keys": "",
-						"greenhouse.sap/workerless":                                "true",
+						greenhouseapis.ClusterWorkerlessAnnotation:                 "true",
 					},
 					Labels: map[string]string{
 						v1alpha1.CareInstructionLabel: careInstruction.Name,
@@ -657,7 +657,7 @@ var _ = Describe("Shoot Controller", func() {
 					Name:      "test-shoot-gain-workers",
 					Namespace: "default",
 				}, secret)).To(Succeed())
-				g.Expect(secret.Annotations).NotTo(HaveKey("greenhouse.sap/workerless"),
+				g.Expect(secret.Annotations).NotTo(HaveKey(greenhouseapis.ClusterWorkerlessAnnotation),
 					"stale workerless annotation should be removed when shoot has workers")
 			}).Should(Succeed(), "should eventually remove workerless annotation")
 		})
