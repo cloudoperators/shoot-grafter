@@ -70,6 +70,18 @@ func PredicateShootStatusNoise() predicate.Predicate {
 			if !apiequality.Semantic.DeepEqual(oldShoot.Status.AdvertisedAddresses, newShoot.Status.AdvertisedAddresses) {
 				return true
 			}
+			// Pass if lastOperation.State changed (e.g. Processing to Succeeded).
+			oldState := ""
+			if oldShoot.Status.LastOperation != nil {
+				oldState = string(oldShoot.Status.LastOperation.State)
+			}
+			newState := ""
+			if newShoot.Status.LastOperation != nil {
+				newState = string(newShoot.Status.LastOperation.State)
+			}
+			if oldState != newState {
+				return true
+			}
 			// Drop all other status-only changes.
 			return false
 		},
