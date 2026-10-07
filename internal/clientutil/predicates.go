@@ -50,7 +50,7 @@ func PredicateConfigMapDataChanged() predicate.Predicate {
 }
 
 // PredicateShootStatusNoise drops Shoot update events that are pure Gardener status noise:
-// events where nothing changed except status fields other than AdvertisedAddresses.
+// events where nothing changed except status fields other than AdvertisedAddresses or lastOperation.State.
 func PredicateShootStatusNoise() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
