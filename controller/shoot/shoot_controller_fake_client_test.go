@@ -273,4 +273,22 @@ var _ = Describe("PredicateShootStatusNoise", func() {
 
 		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
 	})
+
+	It("passes updates where lastOperation.State changed", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		oldObj.Status.LastOperation = &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateProcessing}
+		newObj.Status.LastOperation = &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeTrue())
+	})
+
+	It("drops updates where lastOperation changed but State did not", func() {
+		oldObj := base.DeepCopy()
+		newObj := base.DeepCopy()
+		oldObj.Status.LastOperation = &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded, Progress: 90}
+		newObj.Status.LastOperation = &gardenerv1beta1.LastOperation{State: gardenerv1beta1.LastOperationStateSucceeded, Progress: 100}
+
+		Expect(p.Update(event.UpdateEvent{ObjectOld: oldObj, ObjectNew: newObj})).To(BeFalse())
+	})
 })

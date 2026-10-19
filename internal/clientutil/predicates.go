@@ -50,7 +50,7 @@ func PredicateConfigMapDataChanged() predicate.Predicate {
 }
 
 // PredicateShootStatusNoise drops Shoot update events that are pure Gardener status noise:
-// events where nothing changed except status fields other than AdvertisedAddresses.
+// events where nothing changed except status fields other than AdvertisedAddresses or lastOperation.State.
 func PredicateShootStatusNoise() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -68,6 +68,18 @@ func PredicateShootStatusNoise() predicate.Predicate {
 			}
 			// Pass if AdvertisedAddresses changed (the API server URL lives there).
 			if !apiequality.Semantic.DeepEqual(oldShoot.Status.AdvertisedAddresses, newShoot.Status.AdvertisedAddresses) {
+				return true
+			}
+			// Pass if lastOperation.State changed (e.g. Processing to Succeeded).
+			oldState := ""
+			if oldShoot.Status.LastOperation != nil {
+				oldState = string(oldShoot.Status.LastOperation.State)
+			}
+			newState := ""
+			if newShoot.Status.LastOperation != nil {
+				newState = string(newShoot.Status.LastOperation.State)
+			}
+			if oldState != newState {
 				return true
 			}
 			// Drop all other status-only changes.
