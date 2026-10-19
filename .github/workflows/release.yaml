@@ -17,7 +17,7 @@ on:
 
 jobs:
   cut-release:
-    uses: cloudoperators/common/.github/workflows/shared-release.yaml@main
+    uses: cloudoperators/common/.github/workflows/shared-release.yaml@4a36aa4e13e96d49b6d17f29da005f6cdb42b15b
     permissions:
       contents: write
     with:
