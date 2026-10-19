@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and Greenhouse contributors
+# SPDX-License-Identifier: Apache-2.0
+
+baseURL: "https://cloudoperators.github.io/shoot-grafter"
+languageCode: "en-us"
+title: "shoot-grafter"
+enableEmoji: false
+params:
+  github_repo: "https://github.com/cloudoperators/shoot-grafter"
+  github_branch: "main"
+
+menu:
+  main:
+    - name: "GitHub"
+      pre: "<i class='fab fa-github'></i>"
+      url: "https://github.com/cloudoperators/shoot-grafter"
+      weight: 0
+
+module:
+  mounts:
+    - source: content
+      target: content
+    - source: ../docs
+      target: content/docs
+  hugoVersion:
+    extended: true
+    min: 0.128.0
+  imports:
+    - path: github.com/sapcc/hugo-documentation-templater/v3
+      disable: false
+
+markup:
+  tableOfContents:
+    startLevel: 2
+    endLevel: 4
+
+outputs:
+  section:
+    - HTML
+    - print

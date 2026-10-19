@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration file for <https://github.com/sapcc/go-makefile-maker>
+#
+# NOTE: After running go-makefile-maker, manually apply these changes:
+# 1. Restore tag pattern 'v*.*.*' in container-registry-ghcr.yaml (generator hardcodes '*')
 
 metadata:
   url: https://github.com/cloudoperators/shoot-grafter
@@ -48,6 +51,17 @@ reuse:
   - paths:
       - '*/zz_generated.deepcopy.go'
       - 'crd/*'
+  - paths:
+      - 'website/go.mod'
+      - 'website/go.sum'
+      - 'website/package.json'
+    SPDX-FileCopyrightText: 'SAP SE or an SAP affiliate company and Greenhouse contributors'
+    SPDX-License-Identifier: Apache-2.0
+  - paths:
+      - '**'
+    precedence: aggregate
+    SPDX-FileCopyrightText: '2026 SAP SE or an SAP affiliate company and Greenhouse contributors'
+    SPDX-License-Identifier: Apache-2.0
 
 license:
   addHeaders: true
@@ -69,3 +83,11 @@ verbatim: |
   build/cover.out: setup-envtest
 
   include hack/kubebuilder.mk
+
+  .PHONY: serve-docs
+  serve-docs: ## Serve documentation locally with Hugo (requires hugo extended >= 0.128.0)
+  ifeq (, $(shell which hugo))
+  	@echo "Hugo is not installed. Please install it from https://gohugo.io/installation/"
+  else
+  	cd website && hugo server
+  endif

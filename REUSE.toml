@@ -34,3 +34,20 @@ path = [
   "*/zz_generated.deepcopy.go",
   "crd/*",
 ]
+
+[[annotations]]
+path = [
+  "website/go.mod",
+  "website/go.sum",
+  "website/package.json",
+]
+SPDX-FileCopyrightText = "SAP SE or an SAP affiliate company and Greenhouse contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 SAP SE or an SAP affiliate company and Greenhouse contributors"
+SPDX-License-Identifier = "Apache-2.0"
