@@ -21,7 +21,7 @@ Topics covered:
 - [Getting started](docs/getting-started/_index.md) — what shoot-grafter does
 - [Architecture](docs/architecture/_index.md) — controller design and data flows
 - [Reference](docs/reference/_index.md) — CareInstruction CRD spec and status
-- [User guides](docs/user-guides/_index.md) — usage examples and debugging
+- [User guides](docs/user-guides/) — usage examples and debugging
 
 ## Support, Feedback, Contributing
 

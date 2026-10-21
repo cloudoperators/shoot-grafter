@@ -149,4 +149,4 @@ kubectl annotate careinstruction <new-careinstruction> -n <greenhouse-namespace>
   shoot-grafter.cloudoperators.dev/reconcile=true
 ```
 
-The annotation is required. After the label change the new CareInstruction already reports the Shoot as `Onboarded`, because that status is derived from the Cluster labels, but the shoot controller only runs on Shoot events from the Garden cluster and never re-applies OIDC, RBAC or the authentication ConfigMap. The annotation restarts it. The value must be the literal string `true`. See the [CareInstruction reference](../../reference/#triggering-reconciliation).
+The annotation is required. After the label change the new CareInstruction already reports the Shoot as `Onboarded`, because that status is derived from the Cluster labels, but the shoot controller only runs on Shoot events from the Garden cluster and never re-applies OIDC, RBAC or the authentication ConfigMap. The annotation restarts it. The value must be the literal string `true`. See the [CareInstruction reference](https://github.com/cloudoperators/shoot-grafter/blob/main/docs/reference/_index.md#triggering-reconciliation).
