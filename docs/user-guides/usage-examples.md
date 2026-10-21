@@ -9,7 +9,7 @@ description: >
 ## Example 1: Onboard all Shoots in a namespace
 
 ```yaml
-apiVersion: shoot-grafter.cloudoperators/v1alpha1
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: all-dev-shoots
@@ -22,7 +22,7 @@ spec:
 ## Example 2: Onboard Shoots with specific labels
 
 ```yaml
-apiVersion: shoot-grafter.cloudoperators/v1alpha1
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: production-critical
@@ -45,7 +45,7 @@ spec:
 ## Example 3: Using matchExpressions for advanced selection
 
 ```yaml
-apiVersion: shoot-grafter.cloudoperators/v1alpha1
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: multi-env-shoots
@@ -79,7 +79,7 @@ spec:
 This example shows how to configure OIDC authentication on Shoots to enable Greenhouse authentication:
 
 ```yaml
-apiVersion: shoot-grafter.cloudoperators/v1alpha1
+apiVersion: shoot-grafter.cloudoperators.dev/v1alpha1
 kind: CareInstruction
 metadata:
   name: oidc-enabled-shoots

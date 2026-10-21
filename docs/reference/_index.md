@@ -104,22 +104,21 @@ status:
         status: "True"
         reason: Reconciled
         message: All shoots and clusters are reconciled
-  clusters:
+  shoots:
     - name: shoot-cluster-1
-      status: Ready
+      status: Onboarded
     - name: shoot-cluster-2
-      status: Ready
+      status: Onboarded
     - name: shoot-cluster-3
       status: Failed
       message: couldn't get current server API group list: the server has asked for the client to provide credentials
-  totalShootCount: 4
-  excludedShootCount: 1
-  effectiveShootCount: 3
-  excludedShoots:
     - name: shoot-cluster-4
-      reason: "filtered out by CEL expression"
-  createdClusters: 3
+      status: Excluded
+      message: "filtered out by CEL expression"
+  totalTargetShootCount: 4
+  createdClusters: 2
   failedClusters: 1
+  shootControllerRestartCount: 0
 ```
 
 **Status Fields**:
@@ -128,10 +127,8 @@ status:
 - `GardenClusterAccessReady`: Indicates whether the Garden cluster is accessible
 - `ShootControllerStarted`: Shows if the dynamic Shoot controller has been started
 - `ShootsReconciled`: Reports whether all targeted Shoots have been successfully onboarded
-- `clusters`: Detailed list of all clusters managed by this CareInstruction with their individual status (Ready/Failed) and optional message
-- `totalShootCount`: Total number of Shoots matching the label selector (before CEL filtering)
-- `excludedShootCount`: Number of Shoots excluded by the CEL expression
-- `effectiveShootCount`: Number of Shoots after CEL filtering (`totalShootCount - excludedShootCount`)
-- `excludedShoots`: List of excluded Shoots with names and reasons
-- `createdClusters`: Number of Greenhouse Clusters created by this CareInstruction
-- `failedClusters`: Number of Greenhouse Clusters that are not ready
+- `shoots`: Detailed list of all Shoots targeted by this CareInstruction with their individual status (`Onboarded`, `Failed`, or `Excluded`) and an optional message
+- `totalTargetShootCount`: Total number of Shoots matching the label selector (before CEL filtering)
+- `createdClusters`: Number of Greenhouse Clusters successfully created by this CareInstruction
+- `failedClusters`: Number of Greenhouse Clusters that failed to be created
+- `shootControllerRestartCount`: Number of times the dynamic Shoot controller has been restarted
