@@ -99,9 +99,9 @@ graph LR
     linkStyle default stroke:#000,stroke-width:2px
 ```
 
-The operator consists of two main controllers:
+## Controllers
 
-## CareInstruction Controller
+### CareInstruction Controller
 
 The `CareInstruction` is the primary Custom Resource Definition (CRD) that configures how shoot-grafter operates. Each CareInstruction:
 
@@ -111,7 +111,7 @@ The `CareInstruction` is the primary Custom Resource Definition (CRD) that confi
 - Configures label propagation and additional metadata
 - Manages the lifecycle of dynamically created Shoot controllers
 
-## Shoot Controller
+### Shoot Controller
 
 For each CareInstruction, a dedicated Shoot controller is dynamically created and runs in its own manager. This controller:
 

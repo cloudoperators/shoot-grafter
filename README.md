@@ -14,14 +14,14 @@ This project is part of the [NeoNephos Foundation](https://neonephos.org/).
 
 ## Documentation
 
-Full documentation is available at **https://cloudoperators.github.io/shoot-grafter**.
+Full documentation is available at **https://cloudoperators.github.io/shoot-grafter** (coming soon — pending GitHub Pages setup).
 
 Topics covered:
 
-- [Getting started](https://cloudoperators.github.io/shoot-grafter/docs/getting-started/) — what shoot-grafter does
-- [Architecture](https://cloudoperators.github.io/shoot-grafter/docs/architecture/) — controller design and data flows
-- [Reference](https://cloudoperators.github.io/shoot-grafter/docs/reference/) — CareInstruction CRD spec and status
-- [User guides](https://cloudoperators.github.io/shoot-grafter/docs/user-guides/) — usage examples and debugging
+- [Getting started](docs/getting-started/_index.md) — what shoot-grafter does
+- [Architecture](docs/architecture/_index.md) — controller design and data flows
+- [Reference](docs/reference/_index.md) — CareInstruction CRD spec and status
+- [User guides](docs/user-guides/_index.md) — usage examples and debugging
 
 ## Support, Feedback, Contributing
 
