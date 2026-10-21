@@ -42,6 +42,14 @@ build/cover.out: setup-envtest
 
 include hack/kubebuilder.mk
 
+.PHONY: serve-docs
+serve-docs: ## Serve documentation locally with Hugo (requires hugo extended >= 0.128.0)
+ifeq (, $(shell which hugo))
+	@echo "Hugo is not installed. Please install it from https://gohugo.io/installation/"
+else
+	cd website && hugo server
+endif
+
 install-goimports: FORCE
 	@if ! hash goimports 2>/dev/null; then printf "\e[1;36m>> Installing goimports (this may take a while)...\e[0m\n"; go install golang.org/x/tools/cmd/goimports@latest; fi
 
