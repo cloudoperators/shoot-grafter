@@ -2,7 +2,5 @@
 .claude
 /bin/
 /build/
-/website/node_modules/
 /website/public/
 /website/resources/
-/website/package-lock.json

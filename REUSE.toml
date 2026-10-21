@@ -39,7 +39,6 @@ path = [
 path = [
   "website/go.mod",
   "website/go.sum",
-  "website/package.json",
 ]
 SPDX-FileCopyrightText = "SAP SE or an SAP affiliate company and Greenhouse contributors"
 SPDX-License-Identifier = "Apache-2.0"
