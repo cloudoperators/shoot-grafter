@@ -20,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -59,8 +58,6 @@ type garden struct {
 	authConfigMapHash   string                        // SHA-256 hash of the last-seen auth ConfigMap data
 }
 
-type careInstructionContextKey struct{}
-
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -87,7 +84,7 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	return lifecycle.Reconcile(ctx, r.Client, req.NamespacedName, &v1alpha1.CareInstruction{}, r, nil)
+	return lifecycle.Reconcile(ctx, r.Client, req.NamespacedName, &v1alpha1.CareInstruction{}, r, r.reconcileStatus)
 }
 
 func (r *CareInstructionReconciler) GetFinalizerName() string {
@@ -102,12 +99,6 @@ func (r *CareInstructionReconciler) EnsureCreated(ctx context.Context, obj lifec
 
 	// Initialize conditions to unknown if not set
 	initializeConditionsToUnknown(careInstruction)
-	defer func(careInstruction *v1alpha1.CareInstruction) {
-		if statusErr := r.reconcileStatus(ctx, careInstruction); statusErr != nil {
-			r.Error(statusErr, "failed to reconcile status")
-		}
-	}(careInstruction)
-
 	if err := r.ensureAuthConfigMapLabeled(ctx, careInstruction); err != nil {
 		r.Error(err, "failed to ensure auth ConfigMap is labeled")
 	}
@@ -145,21 +136,8 @@ func (r *CareInstructionReconciler) EnsureDeleted(ctx context.Context, obj lifec
 	r.Info("Reconciling CareInstruction removal", "name", obj.GetName(), "namespace", obj.GetNamespace())
 	careInstruction := obj.(*v1alpha1.CareInstruction)
 
-	// initialize the context with the original CareInstruction object
-	ctx = context.WithValue(ctx, careInstructionContextKey{}, careInstruction.DeepCopyObject())
-
 	// Initialize conditions to unknown if not set
 	initializeConditionsToUnknown(careInstruction)
-	defer func(careInstruction *v1alpha1.CareInstruction) {
-		if statusErr := r.reconcileStatus(ctx, careInstruction); statusErr != nil {
-			r.Error(statusErr, "failed to reconcile status")
-		}
-	}(careInstruction)
-
-	hasFinalizer := controllerutil.ContainsFinalizer(careInstruction, v1alpha1.CommonCleanupFinalizer)
-	if !hasFinalizer {
-		return ctrl.Result{}, lifecycle.Success, nil
-	}
 
 	r.cleanupCareInstruction(careInstruction)
 	return ctrl.Result{}, lifecycle.Success, nil
