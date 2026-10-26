@@ -9,8 +9,8 @@ import (
 	"shoot-grafter/api/v1alpha1"
 
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
+	"github.com/cloudoperators/greenhouse/pkg/lifecycle"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var knownConditionTypes = []greenhousemetav1alpha1.ConditionType{
@@ -38,12 +38,8 @@ func initializeConditionsToUnknown(careInstruction *v1alpha1.CareInstruction) {
 	}
 }
 
-func (r *CareInstructionReconciler) reconcileStatus(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
-	originalCareInstruction, ok := ctx.Value(careInstructionContextKey{}).(*v1alpha1.CareInstruction)
-	if !ok {
-		r.Error(nil, "careInstruction not found in context")
-		return nil
-	}
+func (r *CareInstructionReconciler) reconcileStatus(ctx context.Context, obj lifecycle.RuntimeObject) {
+	careInstruction := obj.(*v1alpha1.CareInstruction)
 	// Initialize ready condition to true, will be overwritten if any sub condition != true
 	careInstruction.Status.SetConditions(
 		greenhousemetav1alpha1.TrueCondition(
@@ -71,7 +67,4 @@ func (r *CareInstructionReconciler) reconcileStatus(ctx context.Context, careIns
 			break
 		}
 	}
-	patch := client.MergeFrom(originalCareInstruction)
-	err := r.Client.Status().Patch(ctx, careInstruction, patch)
-	return err
 }

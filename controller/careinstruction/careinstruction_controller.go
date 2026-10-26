@@ -20,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -28,6 +27,7 @@ import (
 	greenhouseapis "github.com/cloudoperators/greenhouse/api"
 	greenhousemetav1alpha1 "github.com/cloudoperators/greenhouse/api/meta/v1alpha1"
 	greenhousev1alpha1 "github.com/cloudoperators/greenhouse/api/v1alpha1"
+	"github.com/cloudoperators/greenhouse/pkg/lifecycle"
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -58,8 +58,6 @@ type garden struct {
 	authConfigMapHash   string                        // SHA-256 hash of the last-seen auth ConfigMap data
 }
 
-type careInstructionContextKey struct{}
-
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shoot-grafter.cloudoperators.dev,resources=careinstructions/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=greenhouse.sap,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -86,44 +84,22 @@ func (r *CareInstructionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	return lifecycle.Reconcile(ctx, r.Client, req.NamespacedName, &v1alpha1.CareInstruction{}, r, r.reconcileStatus)
+}
+
+func (r *CareInstructionReconciler) GetFinalizerName() string {
+	return v1alpha1.CommonCleanupFinalizer
+}
+
+func (r *CareInstructionReconciler) EnsureCreated(ctx context.Context, obj lifecycle.RuntimeObject) (ctrl.Result, lifecycle.ReconcileResult, error) {
 	r.Logger = ctrl.LoggerFrom(ctx)
-	r.Info("Reconciling CareInstruction", "name", req.Name, "namespace", req.Namespace)
+	r.Info("Reconciling CareInstruction creation/updating", "name", obj.GetName(), "namespace", obj.GetNamespace())
 
-	var careInstruction v1alpha1.CareInstruction
-	if err := r.Get(ctx, req.NamespacedName, &careInstruction); err != nil {
-		r.Error(err, "unable to fetch CareInstruction")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	// initialize the context with the original CareInstruction object
-	ctx = context.WithValue(ctx, careInstructionContextKey{}, careInstruction.DeepCopyObject())
-	shouldBeDeleted := (careInstruction.GetDeletionTimestamp() != nil)
-	hasFinalizer := controllerutil.ContainsFinalizer(&careInstruction, v1alpha1.CommonCleanupFinalizer)
-
-	// check whether finalizer is set
-	if !shouldBeDeleted && !hasFinalizer {
-		return ctrl.Result{}, r.ensureFinalizer(ctx, &careInstruction, v1alpha1.CommonCleanupFinalizer)
-	}
+	careInstruction := obj.(*v1alpha1.CareInstruction)
 
 	// Initialize conditions to unknown if not set
-	initializeConditionsToUnknown(&careInstruction)
-	defer func(careInstruction *v1alpha1.CareInstruction) {
-		if statusErr := r.reconcileStatus(ctx, careInstruction); statusErr != nil {
-			r.Error(statusErr, "failed to reconcile status")
-		}
-	}(&careInstruction)
-
-	// Deletion logic
-	if shouldBeDeleted {
-		// reconcile again for finalizer
-		if !hasFinalizer {
-			return ctrl.Result{}, nil
-		}
-		err := r.cleanupCareInstruction(ctx, &careInstruction)
-		return ctrl.Result{}, err
-	}
-
-	if err := r.ensureAuthConfigMapLabeled(ctx, &careInstruction); err != nil {
+	initializeConditionsToUnknown(careInstruction)
+	if err := r.ensureAuthConfigMapLabeled(ctx, careInstruction); err != nil {
 		r.Error(err, "failed to ensure auth ConfigMap is labeled")
 	}
 
@@ -136,11 +112,12 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				err.Error(),
 			),
 		)
-		return ctrl.Result{}, err
+
+		return ctrl.Result{}, lifecycle.Failed, err
 	}
 
 	// reconcile Shoots and Clusters created by this CareInstruction
-	if err := r.reconcileShootsNClusters(ctx, &careInstruction); err != nil {
+	if err := r.reconcileShootsNClusters(ctx, careInstruction); err != nil {
 		r.Info("failed to reconcile shoots and clusters for CareInstruction, will retry", "error", err.Error())
 		careInstruction.Status.SetConditions(
 			greenhousemetav1alpha1.FalseCondition(
@@ -151,27 +128,23 @@ func (r *CareInstructionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		)
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, lifecycle.Success, nil
 }
 
-// ensureFinalizer - ensures a finalizer is present on the object. Returns an error on failure.
-func (r *CareInstructionReconciler) ensureFinalizer(ctx context.Context, o client.Object, finalizer string) error {
-	if controllerutil.AddFinalizer(o, finalizer) {
-		return r.Update(ctx, o)
-	}
-	return nil
-}
+func (r *CareInstructionReconciler) EnsureDeleted(ctx context.Context, obj lifecycle.RuntimeObject) (ctrl.Result, lifecycle.ReconcileResult, error) {
+	r.Logger = ctrl.LoggerFrom(ctx)
+	r.Info("Reconciling CareInstruction removal", "name", obj.GetName(), "namespace", obj.GetNamespace())
+	careInstruction := obj.(*v1alpha1.CareInstruction)
 
-// removeFinalizer - removes a finalizer from an object. Returns an error on failure.
-func (r *CareInstructionReconciler) removeFinalizer(ctx context.Context, o client.Object, finalizer string) error {
-	if controllerutil.RemoveFinalizer(o, finalizer) {
-		return r.Update(ctx, o)
-	}
-	return nil
+	// Initialize conditions to unknown if not set
+	initializeConditionsToUnknown(careInstruction)
+
+	r.cleanupCareInstruction(careInstruction)
+	return ctrl.Result{}, lifecycle.Success, nil
 }
 
 // reconcileManager - reconciles the shoot controller manager for the given CareInstruction.
-func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careInstruction v1alpha1.CareInstruction) error {
+func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
 	r.Info("Reconciling shoot controller manager for garden cluster", "name", careInstruction.Spec.GardenClusterName)
 
 	// Use namespace-qualified key to prevent collisions between CareInstructions with the same name in different namespaces
@@ -213,7 +186,7 @@ func (r *CareInstructionReconciler) reconcileManager(ctx context.Context, careIn
 	}
 	r.gardensMu.Unlock()
 
-	gardenClientConfig, scheme, err := r.GetGardenClusterAccess(ctx, &careInstruction)
+	gardenClientConfig, scheme, err := r.GetGardenClusterAccess(ctx, careInstruction)
 	// Get Access to the Garden Cluster
 	if err != nil {
 		careInstruction.Status.SetConditions(
@@ -599,7 +572,7 @@ func (r *CareInstructionReconciler) restartShootController(careInstruction *v1al
 }
 
 // cleanupCareInstruction - deletes the CareInstruction and cleans up any resources associated with it.
-func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, careInstruction *v1alpha1.CareInstruction) error {
+func (r *CareInstructionReconciler) cleanupCareInstruction(careInstruction *v1alpha1.CareInstruction) {
 	r.Info("Cleaning up CareInstruction", "name", careInstruction.Name, "namespace", careInstruction.Namespace)
 	careInstruction.Status.SetConditions(
 		greenhousemetav1alpha1.FalseCondition(
@@ -622,20 +595,6 @@ func (r *CareInstructionReconciler) cleanupCareInstruction(ctx context.Context, 
 		r.gardensMu.Unlock()
 		r.Info("Garden manager context not found for careInstruction: " + careInstruction.Name)
 	}
-	// Remove the finalizer
-	if err := r.removeFinalizer(ctx, careInstruction, v1alpha1.CommonCleanupFinalizer); err != nil {
-		r.Error(err, "Unable to remove finalizer from CareInstruction", "name", careInstruction.Name)
-		careInstruction.Status.SetConditions(
-			greenhousemetav1alpha1.FalseCondition(
-				v1alpha1.DeleteCondition,
-				"FinalizerError",
-				err.Error(),
-			),
-		)
-		return err
-	}
-	r.Info("Removed finalizer from CareInstruction", "name", careInstruction.Name)
-	return nil
 }
 
 // ensureAuthConfigMapLabeled patches the auth ConfigMap with AuthConfigMapLabel if it is missing,
@@ -756,4 +715,8 @@ func (r *CareInstructionReconciler) enqueueCareInstructionForAuthConfigMap(ctx c
 		r.Info("Enqueuing CareInstructions for auth ConfigMap change", "configMap", cm.Name, "namespace", cm.Namespace, "count", len(requests))
 	}
 	return requests
+}
+
+func (r *CareInstructionReconciler) EnsureSuspended(_ context.Context, _ lifecycle.RuntimeObject) (ctrl.Result, error) {
+	return ctrl.Result{}, nil
 }
