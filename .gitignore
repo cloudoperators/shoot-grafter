@@ -2,3 +2,5 @@
 .claude
 /bin/
 /build/
+/website/public/
+/website/resources/
