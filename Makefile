@@ -33,7 +33,7 @@ endif
 
 default: build-all
 
-VERSION = 0.5.2
+VERSION = 0.5.3
 
 # Wire envtest into the generated build/cover.out target so 'make build/cover.out'
 # works standalone (as called by the CI workflow) without needing KUBEBUILDER_ASSETS set.
