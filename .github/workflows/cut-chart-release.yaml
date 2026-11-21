@@ -24,6 +24,10 @@ jobs:
       bump: ${{ inputs.bump }}
       chart-path: charts/shoot-grafter/Chart.yaml
       chart-only: true
+      dispatch-greenhouse-extensions: true
+      plugin-name: shoot-grafter
       environment: release
     secrets:
       release-token: ${{ secrets.RELEASE_GH_TOKEN_PR }}
+      dispatch-app-id: ${{ secrets.CLOUDOPERATOR_APP_ID }}
+      dispatch-app-private-key: ${{ secrets.CLOUDOPERATOR_APP_PRIVATE_KEY }}
